@@ -3,6 +3,71 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.6.0 - 2026-09-28
+
+### Added
+
+- `scenes/world_scene.py` — Tile-based overworld scene:
+  - 20×15 tile grid with grass, tall grass, water, path, tree, rock, and
+    building tile types rendered via `pygame.draw` primitives.
+  - Arrow-key / WASD player movement with collision detection against
+    solid tiles (water, trees, rocks, buildings).
+  - Random encounter triggering on tall-grass tiles via
+    `systems.encounter.check_encounter()`; pushes `BattleScene` on
+    encounter.
+  - NPC dialogue overlay with proximity-triggered text box.
+  - HUD showing zone name, player coordinates, and controls hint.
+
+- `scenes/battle_scene.py` — Turn-based battle UI:
+  - HP/MP bars for player and enemy with color-coded HP thresholds
+    (green > 50%, yellow > 25%, red below).
+  - Move selection menu (Up/Down to navigate, Enter to select) showing
+    move name, power, MP cost, and type for each available move.
+  - Scrolling battle log (last 5 messages) driven by `BattleEngine`
+    result messages.
+  - Damage flash overlay (red for player hit, blue for enemy hit).
+  - Flee option (F key) for wild encounters.
+  - Victory: awards XP via `BattleEngine.award_xp()`, applies level-up
+    checks via `systems.progression.check_level_up()`, returns to world.
+  - Defeat: clears scene stack and returns to title scene.
+
+- `tests/` — Pytest test suite (58 tests, all passing):
+  - `tests/test_battle.py` — `BattleDigimon` stats, damage/heal/MP,
+    `BattleEngine` turn order, damage calc, player/enemy attacks,
+    battle-end detection, XP award, flee mechanics, `resolve()`.
+  - `tests/test_progression.py` — XP curve, stat calculation, level-up
+    with stat deltas, level cap, evolution requirements, battle XP.
+  - `tests/test_encounter.py` — Zone definitions, encounter rolling,
+    species/level range validation, terrain-based encounter checks,
+    gold rolling.
+  - `tests/test_save.py` — `PartyMemberData` and `SaveData`
+    serialization round-trips, default values, flags persistence.
+
+- `.gitignore` — Ignores `__pycache__/`, `*.pyc`, `build/`, `dist/`,
+  `.pytest_cache/`, venv dirs, and editor swap files.
+
+### Changed
+
+- `main.py` — `Game` class now extends `SceneManager` so scenes can call
+  `self.game.push()`/`pop()`/`replace()` directly. Initializes player
+  state (`_player_species`, `_player_level`, `_player_xp`). Game loop
+  delegates events/updates/draws to `game` directly.
+- `scenes/title_scene.py` — ENTER key now transitions to `WorldScene`
+  via `self.game.replace()` instead of printing a debug message.
+
+### Removed
+
+- Committed `__pycache__/*.pyc` files removed from git tracking (now
+  gitignored).
+
+### Verification
+
+- All 58 tests pass via `pytest tests/`.
+- pygbag build verified: `python -m pygbag --build main.py` succeeds,
+  43 files packed to `build/web/`.
+- Full game loop simulation tested: title → world → battle (win/lose)
+  → return to world/title.
+
 ## 0.5.0 - 2026-09-28
 
 ### Added
