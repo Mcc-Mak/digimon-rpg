@@ -3,6 +3,117 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.5.0 - 2026-09-28
+
+### Added
+
+- Core game data and systems — 5 importable, testable, pygbag-compatible modules:
+
+  - `data/digimon_data.py` — Original Digimon species and move definitions
+    using `@dataclass(frozen=True)`:
+    - `Move` dataclass (name, power, mp_cost, move_type, element, description)
+      with validation; move_type supports "attack", "special", "defend", "heal".
+    - `Digimon` dataclass (name, stage, element, hp, mp, attack, defense,
+      speed, moves, evolution_target, evolution_requirements, description,
+      growth rates) with `key` property and `get_move()` lookup.
+    - 12 species defined: 2 complete evolution lines (Fire: Emberling →
+      Pyroclaw → Infernosaur; Water: Aquapup → Tsunamut → Leviathore) plus
+      6 additional encounter creatures (Stormwing, Rockbash, Seedkit,
+      Chaospuff, Thornbloom, Voltalon).
+    - `DIGIMON_REGISTRY` dict mapping lowercase species name → Digimon.
+    - `TYPE_CHART` 7×7 elemental effectiveness matrix (fire, water, nature,
+      electric, earth, dark, normal).
+    - `get_digimon(name)` and `get_type_multiplier(attacker, defender)`
+      helper functions.
+    - 24 move definitions across 6 element families.
+
+  - `systems/progression.py` — XP, leveling, stat growth, and evolution:
+    - `xp_to_reach_level(level)` — XP curve formula `int(10 * (L-1)^2.6)`.
+    - `xp_for_next_level(current_level)` — delta XP to next level.
+    - `calculate_stat(base, growth_rate, level)` — `floor(base * (1 + growth_rate * (L-1)))`.
+    - `calculate_stats_at_level(digimon, level)` — full 5-stat block.
+    - `level_up(digimon, current_level, current_xp)` — computes old/new stats
+      and deltas; capped at `LEVEL_CAP = 50`.
+    - `check_level_up(current_level, current_xp)` — returns
+      (can_level_up, new_level, remaining_xp).
+    - `can_evolve(creature_name, level, battles_won, boss_defeats)` — validates
+      evolution requirements from species definition (Rookie→Champion: Lv 10+,
+      5 battles; Champion→Ultimate: Lv 25+, 15 battles, 1 boss).
+    - `xp_from_battle(enemy_base_xp, enemy_level, player_level, is_boss)` —
+      `floor(base_xp * (enemy_lvl/player_lvl) * 1.2)`, boss = 2×.
+
+  - `systems/encounter.py` — Zone encounter tables and rolling:
+    - `EncounterEntry` dataclass (species_id, weight, min_level, max_level,
+      base_xp) with validation.
+    - `Zone` dataclass (zone_id, name, min_level, max_level, encounter_entries,
+      encounter_rates, gold_min, gold_max) with validation.
+    - 2 zones: Verdant Plains (6 species, levels 1–12, 3 terrain types) and
+      Storm Peaks (7 species, levels 15–28, 3 terrain types).
+    - `roll_encounter(zone_id, rng)` — weighted random species/level/xp.
+    - `check_encounter(zone_id, terrain_type, rng)` — terrain rate check +
+      encounter roll.
+    - `roll_gold(zone_id, rng)` — random gold in zone range.
+    - `get_zone(zone_id)` — zone lookup.
+    - Seedable `random.Random` for deterministic testing.
+
+  - `systems/save_system.py` — Async save/load with WASM localStorage support:
+    - `PartyMemberData` dataclass (species_id, nickname, level, stage, xp,
+      current_hp, current_mp, battles_won, learned_moves) with
+      `to_dict()`/`from_dict()`.
+    - `SaveData` dataclass (player_name, player_position, current_zone, party,
+      defeated_encounters, game_flags, gold) with `to_dict()`/`from_dict()`.
+    - `save_game(data, slot)` — async, serializes to JSON, writes to
+      `js.localStorage` (browser) or in-memory dict (desktop).
+    - `load_game(slot)` — async, reads and deserializes.
+    - `has_save(slot)`, `delete_save(slot)`, `list_save_slots()`.
+    - `create_default_save(player_name, starter_species)` — fresh level-1 save.
+    - `SaveSystem` class wrapper for OOP usage.
+    - Detects browser via `import js`; falls back to memory store on desktop.
+    - All async functions use `await asyncio.sleep(0)` for WASM yield.
+
+  - `systems/battle.py` — Turn-based battle engine:
+    - `BattleDigimon` dataclass — wraps species + level with live HP/MP,
+      attack, defense, speed, moves, element, is_defending, status_effects.
+      Auto-computes stats from species + level via progression formulas.
+      `from_species()` factory classmethod.
+    - `BattleResult` dataclass (winner, xp_awarded, gold_awarded, rounds, log).
+    - `BattleEngine` class:
+      - `determine_turn_order()` — speed + random(0,20) initiative, player
+        wins ties.
+      - `calculate_damage(attacker, defender, move)` — formula
+        `(atk * move_power / def) * random(0.85..1.15) * type_mult`,
+        defender defending halves damage, min 1.
+      - `execute_move(attacker, defender, move)` — handles attack, special,
+        defend, heal move types; MP cost validation.
+      - `player_attack(move_index)` — player action with round tracking.
+      - `enemy_turn()` — AI: 60% strongest, 30% random, 10% basic; heals
+        at <25% HP with 40% chance if heal move available.
+      - `check_battle_end()` — returns "player"/"enemy"/None.
+      - `attempt_flee()` — flee chance clamped 0.40–0.90, wild only.
+      - `get_battle_state()` — full snapshot dict for UI.
+      - `award_xp()` — XP formula, boss = 2×.
+      - `resolve(gold_awarded, player_fled)` — builds BattleResult.
+
+### WASM Safety
+
+- All 5 modules verified WASM-safe: no `subprocess`, no blocking file I/O,
+  no `threading`, no `ctypes`, no `time.sleep`, no native modules. Only
+  Python stdlib (`dataclasses`, `random`, `json`, `math`, `asyncio`,
+  `typing`) used — no external dependencies. Save system uses
+  `await asyncio.sleep(0)` for browser yield, with localStorage fallback
+  to in-memory dict (NFR-01, NFR-03).
+
+### Verification
+
+- All 5 files pass `ast.parse` syntax validation.
+- All 5 modules import successfully with cross-module dependencies resolved
+  (`data.digimon_data` ← `systems.progression` ← `systems.battle`;
+  `data.digimon_data` ← `systems.save_system`;
+  `systems.encounter` standalone).
+- Functional smoke tests pass: evolution checks, XP curve, stat growth,
+  save/load round-trip, encounter rolling, battle engine (player attack,
+  enemy AI, flee, boss XP).
+
 ## 0.4.0 - 2026-09-28
 
 ### Added
