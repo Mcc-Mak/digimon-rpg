@@ -3,6 +3,157 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.8.0 - 2026-09-28
+
+### Added
+
+- `scenes/world.py` — Tile-based overworld scene (WorldScene):
+  - 20×15 tile grid (32px tiles = 640×480) with 7 tile types: grass,
+    tall grass, path, water, tree, water_edge, and sign — each rendered
+    via `pygame.draw` primitives with decorations (tree canopy circles,
+    water arcs, tall-grass blades, sign post + board).
+  - Arrow-key / WASD grid-based movement with 0.15s cooldown and
+    collision detection against water and tree tiles.
+  - Random encounter triggering on grass/tall_grass/water_edge tiles
+    via `systems.encounter.check_encounter("verdant_plains", terrain)`.
+    On encounter, stores `game.pending_encounter` and pushes
+    `BattleScene`.
+  - Player rendered as a red circle with white outline.
+  - Sign NPC at tile (3,7): pressing ENTER/SPACE when adjacent shows a
+    semi-transparent dialogue text box with word-wrapped text and a
+    "Press ENTER to close" prompt.
+  - HUD bar at bottom showing zone name, step count, and controls hint.
+  - 0.5s encounter cooldown after returning from battle (no instant
+    re-encounter).
+  - ESC key clears scene stack and returns to TitleScene.
+  - `enter()` restores player position from `game.player_world_pos`
+    and processes/clears `game.battle_result` on return from battle.
+
+- `scenes/battle.py` — Full turn-based battle scene (BattleScene):
+  - 9-phase state machine: INTRO → PLAYER_MENU → PLAYER_ANIM →
+    ENEMY_ANIM → MESSAGE → VICTORY / DEFEAT / EVOLUTION / FLEE_RESULT.
+  - Reads encounter from `game.pending_encounter` and player party
+    from `game.save_data.party[0]`; constructs `BattleDigimon` for both
+    sides via `from_species()` and a `BattleEngine`.
+  - Player Digimon drawn as element-colored circle on left, enemy on
+    right; circle radius scales by evolution stage (Rookie 25px,
+    Champion 35px, Ultimate 45px). Each shape has a white outline and
+    simple "eyes" for character.
+  - HP bars (200px) with color-coded thresholds (green >50%, yellow
+    25–50%, red <25%) and player MP bar — rendered for both combatants.
+  - Move selection menu: 2×2 grid showing all 4 moves with number,
+    name, power, MP cost, and element. Select via keys 1–4 or arrow
+    navigation + ENTER. Moves with insufficient MP shown in red and
+    blocked. "F. Flee" option at bottom.
+  - Attack animation: player/enemy circle lunges toward the opponent
+    over 0.3s, triggers a white screen flash at the impact midpoint
+    (alpha decaying over ~0.3s), then returns over 0.3s.
+  - Battle log area showing last 3 messages from `engine.log`.
+  - Turn ordering via `engine.determine_turn_order()` (speed + random
+    initiative); new order re-rolled each round.
+  - Victory: awards XP via `engine.award_xp()`, gold via
+    `roll_gold("verdant_plains")`, applies multi-level-up chain via
+    `check_level_up()` with stat delta display, increments
+    `battles_won`, syncs HP/MP from battle to save, and checks
+    evolution via `can_evolve()`.
+  - Evolution animation: pulsing white screen flash, shape transform
+    (color + size change to new species), evolution message, then
+    returns to victory screen. Updates `party_member.species_id`,
+    `stage`, stats, and `learned_moves`.
+  - Defeat: shows "You were defeated..." message, ENTER clears scene
+    stack and returns to TitleScene.
+  - Flee: calls `engine.attempt_flee()`; on success shows message and
+    pops to world; on failure shows "Couldn't escape!" and enemy gets
+    a free turn.
+  - All timers driven by `dt` in `update()` — no blocking operations.
+
+### Changed
+
+- `main.py` — `Game` class updated: player starting position changed
+  to (10, 6) to match world map walkable tile.
+- `scenes/title_scene.py` — ENTER key now creates a default save
+  (Emberling starter at level 5 with recalculated stats) via
+  `create_default_save()` + `calculate_stats_at_level()`, stores it
+  on `game.save_data`, sets `game.player_world_pos = (10, 6)`, and
+  transitions to `WorldScene` via `game.replace()`.
+
+### WASM Safety
+
+- All new and modified code verified WASM-safe: no `subprocess`, no
+  blocking file I/O (no `open()` calls), no `threading`, no `ctypes`,
+  no `time.sleep`, no external image/audio loading. All graphics use
+  `pygame.draw` and `pygame.font` primitives only. All timers are
+  dt-driven in `update()` (NFR-01, NFR-03).
+
+### Verification
+
+- All files pass `ast.parse` syntax validation.
+- All modules import successfully with cross-module dependencies
+  resolved.
+- Integration tests pass (pygame dummy driver):
+  - Title → World scene transition on ENTER.
+  - World movement, collision, sign dialogue, encounter triggering.
+  - Battle: intro → player menu → attack → animation → message →
+    enemy turn → round cycle.
+  - Victory with XP, multi-level-up, gold, and stat delta messages.
+  - Evolution trigger (Lv 10+, 5 battles): animation + species
+    transform (Emberling → Pyroclaw).
+  - Defeat: returns to TitleScene on ENTER.
+  - Flee: success/fail handling.
+  - MP check: unaffordable moves blocked with "Not enough MP!" message.
+  - ESC from world returns to TitleScene.
+
+## 0.7.0 - 2026-09-28
+
+### Added
+
+- `core/sprite_factory.py` — Procedural per-species creature sprites:
+  - Each of the 12 Digimon species now has a dedicated, recognizable
+    silhouette drawn entirely with `pygame.draw` primitives onto a
+    transparent `SRCALPHA` surface (no external image assets — WASM-safe).
+  - Element-derived palettes (fire/water/nature/electric/earth/dark) drive
+    body, accent, and glow colors; evolution stage drives canvas size
+    (Rookie 56px < Champion 72px < Ultimate 88px).
+  - Per-species features: Emberling tail-flame, Pyroclaw molten veins +
+    white-hot claws, Infernosaur wings + flame aura, Aquapup translucent
+    fins + big eyes, Tsunamut water jets + enormous claws, Leviathore
+    serpentine body + dorsal fins, Stormwing feathered wings + static
+    arcs, Rockbash overlapping stone plates, Seedkit flower bud + leaves,
+    Chaospuff wispy drifting body + glowing eyes, Thornbloom thorny stem
+    + flower head, Voltalon wings shedding lightning + crest horns.
+  - `get_sprite(name)`, `get_battle_sprite(name, facing)`,
+    `get_world_sprite(name, size, facing)`, `clear_cache()` with module-
+    level caching (base sprites, flipped/scaled battle + world variants).
+  - Unknown species fall back to a generic elemental blob so rendering
+    never crashes.
+
+- `tests/test_sprites.py` — 12 tests: dedicated-drawer coverage for all
+  species, surface generation, stage-scaled sizing, transparent
+  background, non-blank rendering, generic fallback, cache identity,
+  left/right facing flip, world-sprite scaling.
+
+### Changed
+
+- `scenes/battle_scene.py` — Combatants are now rendered as species
+  sprites instead of plain colored circles. Player faces right, enemy is
+  horizontally flipped to face the player. Sprites scale slightly with
+  level (clamped 1.0–1.35) and are cached per battle; a soft drop shadow
+  grounds each creature on its platform.
+- `scenes/world_scene.py` — The overworld avatar is now the player's
+  chosen Digimon species sprite (scaled to 30px) instead of a red circle.
+  Avatar flips horizontally based on the last horizontal movement
+  direction; soft drop shadow added under the avatar.
+
+### Verification
+
+- All 70 tests pass via `pytest tests/` (58 existing + 12 new sprite
+  tests).
+- pygbag build verified: `python -m pygbag --build main.py` succeeds,
+  45 files packed to `build/web/`.
+- Render smoke test: all 12 species generate non-blank sprites with
+  stage-scaled sizes; `BattleScene` and `WorldScene` draw end-to-end
+  under a dummy video driver.
+
 ## 0.6.0 - 2026-09-28
 
 ### Added

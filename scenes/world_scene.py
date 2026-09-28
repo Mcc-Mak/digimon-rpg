@@ -19,6 +19,7 @@ import pygame
 
 import config
 from core.scene import Scene
+from core.sprite_factory import get_world_sprite
 from systems.encounter import check_encounter, ZONES
 
 # Tile size in pixels.
@@ -109,6 +110,7 @@ class WorldScene(Scene):
         self._player_x: int = 5
         self._player_y: int = 5
         self._move_timer: float = 0.0
+        self._facing: str = "right"
         self._encounter_rng: random.Random = random.Random()
         self._dialogue_text: str = ""
         self._dialogue_timer: float = 0.0
@@ -160,6 +162,10 @@ class WorldScene(Scene):
             return
         self._player_x = nx
         self._player_y = ny
+        if dx < 0:
+            self._facing = "left"
+        elif dx > 0:
+            self._facing = "right"
         self._move_timer = _MOVE_COOLDOWN
         self._check_encounter(tile)
 
@@ -223,10 +229,16 @@ class WorldScene(Scene):
                     pygame.draw.circle(screen, config.WHITE, (cx, cy - 12), 6)
 
     def _draw_player(self, screen: pygame.Surface) -> None:
+        species = getattr(self.game, "_player_species", "emberling")
+        sprite = get_world_sprite(species, size=30, facing=self._facing)
         px = self._player_x * _TILE_SIZE + _TILE_SIZE // 2
-        py = self._player_y * _TILE_SIZE + _TILE_SIZE // 2
-        pygame.draw.circle(screen, config.RED, (px, py), 11)
-        pygame.draw.circle(screen, config.WHITE, (px, py - 12), 6)
+        py = self._player_y * _TILE_SIZE + _TILE_SIZE - 2
+        # Soft drop shadow under the avatar.
+        shadow = pygame.Surface((24, 8), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow, (0, 0, 0, 110), (0, 0, 24, 8))
+        screen.blit(shadow, (px - 12, py - 4))
+        rect = sprite.get_rect(midbottom=(px, py))
+        screen.blit(sprite, rect)
 
     def _draw_hud(self, screen: pygame.Surface) -> None:
         zone_name = ZONES[_ZONE_ID].name
