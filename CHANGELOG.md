@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.2.0 - 2026-09-28
+
+### Added
+
+- "CrewAI build workflow" section to `AGENTS.md`: recommended crew composition
+  (lead designer, pygame engineer, systems engineer, QA engineer), task flow
+  (design -> scaffold -> implement -> verify), crew constraints, and how to
+  invoke the `crewai_run_project` orchestrator for building the game.
+
 ## 0.1.0 - 2026-09-28
 
 ### Added
