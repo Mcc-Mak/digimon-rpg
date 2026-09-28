@@ -19,13 +19,35 @@ WASM safety:
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Any, Optional
 
 import pygame
 
 import config
 from core.scene_manager import SceneManager
 from scenes.title_scene import TitleScene
+from systems.save_system import SaveData
+
+
+class Game(SceneManager):
+    """Central game-state object shared across all scenes.
+
+    Extends :class:`SceneManager` so scenes can call ``self.game.push()``,
+    ``self.game.pop()``, etc. directly, while also carrying transient state
+    that scenes use to communicate (player species/level/xp, encounter data,
+    battle results, save data).
+    """
+
+    def __init__(self) -> None:
+        """Initialize a fresh scene manager with default player state."""
+        super().__init__()
+        self._player_species: str = "emberling"
+        self._player_level: int = 5
+        self._player_xp: int = 0
+        self.save_data: Optional[SaveData] = None
+        self.pending_encounter: Optional[dict] = None
+        self.battle_result: Any = None
+        self.player_world_pos: tuple = (10, 7)
 
 
 async def main() -> None:
@@ -39,10 +61,9 @@ async def main() -> None:
     # Clock targets FPS; each tick returns milliseconds since last frame.
     clock: pygame.time.Clock = pygame.time.Clock()
 
-    # Build the scene manager and push the title scene as the initial state.
-    scene_manager: SceneManager = SceneManager()
-    title_scene: TitleScene = TitleScene(game=scene_manager)
-    scene_manager.push(title_scene)
+    # Build the game state and push the title scene as the initial state.
+    game: Game = Game()
+    game.push(TitleScene(game=game))
 
     running: bool = True
 
@@ -56,11 +77,11 @@ async def main() -> None:
                 if event.type == pygame.QUIT:
                     running = False
                 else:
-                    scene_manager.handle_event(event)
+                    game.handle_event(event)
 
             # Update the active scene, then render it.
-            scene_manager.update(dt)
-            scene_manager.draw(screen)
+            game.update(dt)
+            game.draw(screen)
             pygame.display.flip()
 
             # CRITICAL: yield to the browser event loop. This is required for
