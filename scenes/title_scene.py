@@ -4,8 +4,8 @@ Presents the game title, a blinking "Press ENTER to Start" prompt, and an
 animated geometric/pattern background. Rendered entirely with ``pygame.draw``
 primitives so no external image assets are required (WASM-safe).
 
-Pressing ENTER currently prints a message to the console — a placeholder for
-the eventual transition to the next scene (character creation / world map).
+Pressing ENTER creates a default save (starter Emberling at level 5) and
+transitions to the world exploration scene.
 """
 
 from __future__ import annotations
@@ -82,15 +82,36 @@ class TitleScene(Scene):
     # ------------------------------------------------------------------
 
     def handle_event(self, event: pygame.event.Event) -> None:
-        """Respond to key presses — ENTER starts the game placeholder.
+        """Respond to key presses — ENTER starts the game.
+
+        Creates a default save with a starter Emberling at level 5 and
+        transitions to the world exploration scene.
 
         Args:
             event: The pygame event to process.
         """
         if event.type == pygame.KEYDOWN:
             if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                from scenes.world_scene import WorldScene
-                self.game.replace(WorldScene(game=self.game))
+                self._start_game()
+
+    def _start_game(self) -> None:
+        """Create a default save and transition to the world scene."""
+        from systems.save_system import create_default_save
+        from scenes.world import WorldScene
+
+        # Create a fresh save with Emberling starter at level 5.
+        save = create_default_save("Player", "emberling")
+        save.party[0].level = 5
+        # Recalculate stats for level 5.
+        from data.digimon_data import get_digimon
+        from systems.progression import calculate_stats_at_level
+        species = get_digimon("emberling")
+        stats = calculate_stats_at_level(species, 5)
+        save.party[0].current_hp = stats["hp"]
+        save.party[0].current_mp = stats["mp"]
+        self.game.save_data = save
+        self.game.player_world_pos = (10, 6)
+        self.game.replace(WorldScene(game=self.game))
 
     # ------------------------------------------------------------------
     # Update

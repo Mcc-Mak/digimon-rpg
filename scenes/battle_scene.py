@@ -19,6 +19,7 @@ import pygame
 
 import config
 from core.scene import Scene
+from core.sprite_factory import get_battle_sprite
 from systems.battle import BattleEngine, BattleDigimon, BattleResult
 from systems.progression import check_level_up, xp_to_reach_level
 
@@ -56,6 +57,10 @@ class BattleScene(Scene):
         self._font_lg: pygame.font.Font = pygame.font.Font(None, 28)
         self._font_md: pygame.font.Font = pygame.font.Font(None, 22)
         self._font_sm: pygame.font.Font = pygame.font.Font(None, 18)
+
+        # Cache for level-scaled combatant sprites so we don't re-scale every
+        # frame. Keyed by (species, facing, scale_bucket).
+        self._combatant_cache: dict = {}
 
     def enter(self) -> None:
         pass
@@ -202,13 +207,48 @@ class BattleScene(Scene):
         p = self._engine.player
         e = self._engine.enemy
 
-        p_size = 20 + (p.level // 5)
-        pygame.draw.circle(screen, config.RED, (120, 270), p_size)
-        pygame.draw.circle(screen, config.WHITE, (120, 270 - p_size - 6), 7)
+        # Player on the left platform (feet rest near platform center y=288),
+        # enemy on the right platform (y=188), flipped to face the player.
+        self._blit_combatant(screen, p.species_name, 120, 290, "right", p.level)
+        self._blit_combatant(screen, e.species_name, 520, 190, "left", e.level)
 
-        e_size = 20 + (e.level // 5)
-        pygame.draw.circle(screen, config.PURPLE, (520, 170), e_size)
-        pygame.draw.circle(screen, config.WHITE, (520, 170 - e_size - 6), 7)
+    def _blit_combatant(
+        self,
+        screen: pygame.Surface,
+        species: str,
+        x: int,
+        bottom_y: int,
+        facing: str,
+        level: int,
+    ) -> None:
+        """Draw a grounded creature sprite with a soft drop shadow.
+
+        The sprite is scaled up slightly with level (clamped) so higher-level
+        combatants read as heftier. Scaled sprites are cached per battle.
+        """
+        scale = max(1.0, min(1.35, 1.0 + (max(1, level) - 1) * 0.015))
+        # Bucket the scale to the nearest 5% so the cache stays tiny.
+        bucket = round(scale * 20) / 20
+        cache_key = (species, facing, bucket)
+        scaled = self._combatant_cache.get(cache_key)
+        if scaled is None:
+            base = get_battle_sprite(species, facing=facing)
+            w = max(1, int(base.get_width() * bucket))
+            h = max(1, int(base.get_height() * bucket))
+            scaled = pygame.transform.scale(base, (w, h))
+            self._combatant_cache[cache_key] = scaled
+
+        # Soft drop shadow on the platform.
+        sw = scaled.get_width()
+        shadow_w = max(16, sw // 2)
+        shadow_h = max(5, shadow_w // 5)
+        shadow = pygame.Surface((shadow_w * 2, shadow_h * 2), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow, (0, 0, 0, 110),
+                            (0, 0, shadow_w * 2, shadow_h * 2))
+        screen.blit(shadow, (x - shadow_w, bottom_y - shadow_h))
+
+        rect = scaled.get_rect(midbottom=(x, bottom_y))
+        screen.blit(scaled, rect)
 
     def _draw_hp_bars(self, screen: pygame.Surface) -> None:
         p = self._engine.player
