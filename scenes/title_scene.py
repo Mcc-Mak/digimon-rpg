@@ -89,9 +89,8 @@ class TitleScene(Scene):
         """
         if event.type == pygame.KEYDOWN:
             if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                # FIXME: Replace with a real scene transition once the next
-                # scene (world / character creation) is implemented.
-                print("Enter pressed — starting game (next scene not built yet).")
+                from scenes.world_scene import WorldScene
+                self.game.replace(WorldScene(game=self.game))
 
     # ------------------------------------------------------------------
     # Update
