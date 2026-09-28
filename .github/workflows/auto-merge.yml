@@ -1,0 +1,83 @@
+name: Release pipeline
+
+# Single workflow that cascades dev-001 -> dev -> main and deploys the pygame
+# app (packaged to WASM via pygbag) to GitHub Pages.
+# Uses the built-in GITHUB_TOKEN (no PAT needed): pushes made with it do not
+# trigger other workflows, but that is fine here because the whole pipeline
+# runs in this one file.
+on:
+  push:
+    branches: [dev-001]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-pipeline
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge dev-001 into dev
+        run: |
+          git fetch origin dev dev-001
+          git checkout dev
+          git reset --hard origin/dev
+          git merge origin/dev-001 --no-ff -m "Auto-merge dev-001 into dev"
+          git push origin dev
+
+      - name: Merge dev into main
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          git merge dev --no-ff -m "Auto-merge dev into main"
+          git push origin main
+
+  deploy:
+    needs: merge
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pygbag
+        run: pip install pygbag
+
+      - name: Build pygame app for web
+        run: python -m pygbag --build main.py
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './build/web'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
