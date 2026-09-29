@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Document** | Schema.md |
-| **Version** | 0.6.0 |
+| **Version** | 0.7.0 |
 | **Date** | 2026-09-29 |
 | **Status** | Approved |
 | **Dependencies** | [ER.md](ER.md), [PRD.md](PRD.md), [Architecture.md](Architecture.md) |
@@ -735,7 +735,11 @@ hybrid model: it first attempts to load the PNG via
 decodes PNGs natively); if the load fails (e.g. desktop without
 SDL2_image), it falls back to procedural drawing. The 12 hand-crafted
 species have dedicated procedural drawers, and the 128 expanded species
-use the element-tinted generic fallback.
+use element-specific generic drawers (`_ELEMENT_DRAWERS`) that produce
+distinct silhouettes per element (fire, water, nature, electric, earth,
+dark, normal) instead of a uniform circle. `_load_png_sprite` also emits
+debug `print()` output (visible in the browser console under pygbag)
+logging the path checked, file existence, and load success/failure.
 
 **Animation system:** `core/animator.py` provides frame-based sprite
 animation using procedurally generated frames derived from the base

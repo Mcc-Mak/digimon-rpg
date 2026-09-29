@@ -3,6 +3,38 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.12.0 - 2026-09-29
+
+### Added
+
+- `core/sprite_factory.py` — Element-specific procedural fallback drawers:
+  - Seven new generic drawers replace the single circle-based
+    `_draw_generic`: `_draw_generic_fire` (bipedal lizard with flame
+    tail), `_draw_generic_water` (fish with fins and bubbles),
+    `_draw_generic_nature` (quadruped with leaf adornments),
+    `_draw_generic_electric` (mouse-like with spark cheeks),
+    `_draw_generic_earth` (bulky quadruped with rocky back plates),
+    `_draw_generic_dark` (shadowy creature with wispy tendrils),
+    `_draw_generic_normal` (small furry mammal with whiskers).
+  - `_ELEMENT_DRAWERS` dict dispatches by element when a species has no
+    dedicated drawer, so the 128 species without custom art now get
+    distinct, element-themed silhouettes instead of identical circles.
+  - Debug logging in `_load_png_sprite`: prints PNG path, existence
+    check, load success/failure, and surface size to the browser console
+    (via `print(..., flush=True)`) to aid WASM asset-loading diagnosis.
+
+### Changed
+
+- `core/sprite_factory.py` — `_build_sprite` now resolves the drawer via
+  `_DRAWERS` (per-species) then `_ELEMENT_DRAWERS` (per-element) before
+  falling back to `_draw_generic_normal`. `get_sprite` unknown-species
+  path uses `_draw_generic_normal` instead of the removed `_draw_generic`.
+
+### Verification
+
+- All 101 tests pass (`pytest tests/ -v`).
+- pygbag build succeeds (189 files packed, 140 PNGs included).
+
 ## 0.11.0 - 2026-09-29
 
 ### Added
