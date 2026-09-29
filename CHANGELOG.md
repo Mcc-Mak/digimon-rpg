@@ -3,6 +3,24 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.18.0 - 2026-09-29
+
+### Added
+
+- `core/wasm_log.py` — Cross-platform logging helper. Calls
+  `js.console.log` under pygbag/WASM (visible in browser DevTools
+  console) and falls back to `print()` on desktop.
+
+### Changed
+
+- `core/sprite_factory.py` — `_diag()` now routes to `browser_log()`
+  so all sprite-loading diagnostics (CWD, path candidates, load
+  success/failure) appear in the browser DevTools console, not just
+  the xterm panel.
+- `main.py` — Wrapped `main()` in try/except that logs the full
+  traceback to the console on any fatal crash. Added `[main] starting`
+  and `[main] entering game loop` markers to confirm code execution.
+
 ## 0.17.0 - 2026-09-29
 
 ### Fixed
