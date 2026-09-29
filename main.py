@@ -25,6 +25,7 @@ import pygame
 
 import config
 from core.scene_manager import SceneManager
+from core.wasm_log import browser_log
 from scenes.title_scene import TitleScene
 from systems.save_system import SaveData
 
@@ -52,47 +53,56 @@ class Game(SceneManager):
 
 async def main() -> None:
     """Initialize the display, run the async game loop, and clean up."""
-    pygame.init()
-
-    # Display setup using the shared config dimensions.
-    screen: pygame.Surface = pygame.display.set_mode(config.SCREEN_SIZE)
-    pygame.display.set_caption(config.WINDOW_CAPTION)
-
-    # Clock targets FPS; each tick returns milliseconds since last frame.
-    clock: pygame.time.Clock = pygame.time.Clock()
-
-    # Build the game state and push the title scene as the initial state.
-    game: Game = Game()
-    game.push(TitleScene(game=game))
-
-    running: bool = True
-
+    browser_log("[main] starting")
     try:
-        while running:
-            # dt in seconds since the last frame, clamped to FPS target.
-            dt: float = clock.tick(config.FPS) / 1000.0
+        pygame.init()
 
-            # Process all pending pygame events.
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                else:
-                    game.handle_event(event)
+        # Display setup using the shared config dimensions.
+        screen: pygame.Surface = pygame.display.set_mode(config.SCREEN_SIZE)
+        pygame.display.set_caption(config.WINDOW_CAPTION)
 
-            # Update the active scene, then render it.
-            game.update(dt)
-            game.draw(screen)
+        # Clock targets FPS; each tick returns milliseconds since last frame.
+        clock: pygame.time.Clock = pygame.time.Clock()
 
-            pygame.display.flip()
+        # Build the game state and push the title scene as the initial state.
+        game: Game = Game()
+        game.push(TitleScene(game=game))
 
-            # CRITICAL: yield to the browser event loop. This is required for
-            # pygbag/WASM to remain responsive; it is a cheap no-op on desktop.
-            await asyncio.sleep(0)
-    except KeyboardInterrupt:
-        # Allow Ctrl+C to quit a local session cleanly.
-        running = False
-    finally:
-        pygame.quit()
+        running: bool = True
+        browser_log("[main] entering game loop")
+
+        try:
+            while running:
+                # dt in seconds since the last frame, clamped to FPS target.
+                dt: float = clock.tick(config.FPS) / 1000.0
+
+                # Process all pending pygame events.
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        running = False
+                    else:
+                        game.handle_event(event)
+
+                # Update the active scene, then render it.
+                game.update(dt)
+                game.draw(screen)
+
+                pygame.display.flip()
+
+                # CRITICAL: yield to the browser event loop. This is required for
+                # pygbag/WASM to remain responsive; it is a cheap no-op on desktop.
+                await asyncio.sleep(0)
+        except KeyboardInterrupt:
+            # Allow Ctrl+C to quit a local session cleanly.
+            running = False
+        finally:
+            pygame.quit()
+    except Exception:
+        import traceback
+
+        tb = traceback.format_exc()
+        browser_log(f"[main] FATAL:\n{tb}")
+        raise
 
 
 # Standard pygbag boilerplate — works both locally and under pygbag/WASM.
