@@ -3,6 +3,35 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.10.0 - 2026-09-29
+
+### Changed
+
+- `core/sprite_factory.py` — Switched from purely procedural sprites to
+  a hybrid PNG-first / procedural-fallback model:
+  - `_build_sprite()` now calls `_load_png_sprite()` first, which
+    attempts `pygame.image.load()` on
+    `assets/sprites/creatures/{species_key}_{stage_num}.png`.
+  - If the PNG is missing or cannot be decoded (e.g. desktop without
+    SDL2_image), the original procedural drawer runs instead so
+    rendering never crashes.
+  - Under pygbag/WASM the browser decodes PNGs natively, so all 140
+    sprite assets are displayed at runtime.
+  - Added `_STAGE_NUM` mapping (Rookie=1, Champion=2, Ultimate=3),
+    `_SPRITE_DIR` constant, `_FORCE_PROCEDURAL` flag (for tests), and
+    `import os`.
+  - Module docstring updated to document the hybrid approach.
+
+- `tests/test_sprites.py` — Tests now set `_FORCE_PROCEDURAL = True`
+  in `setup_module` so the procedural path is exercised deterministically
+  regardless of host PNG support. Docstring updated.
+
+### Verification
+
+- All 71 tests pass (`pytest tests/ -v`).
+- pygbag build succeeds (187 files packed, 140 PNGs confirmed in
+  `digimon-rpg.tar.gz`).
+
 ## 0.9.0 - 2026-09-29
 
 ### Added
