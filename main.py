@@ -25,7 +25,6 @@ import pygame
 
 import config
 from core.scene_manager import SceneManager
-from core.sprite_factory import get_diagnostics
 from scenes.title_scene import TitleScene
 from systems.save_system import SaveData
 
@@ -83,19 +82,6 @@ async def main() -> None:
             # Update the active scene, then render it.
             game.update(dt)
             game.draw(screen)
-
-            # Debug overlay: draw sprite diagnostics on top of the scene
-            # so they are visible in the browser (console.log doesn't work
-            # in pygbag — output goes to xterm terminal, not DevTools).
-            _diags = get_diagnostics()
-            if _diags:
-                _font = pygame.font.Font(None, 16)
-                _bg = pygame.Surface((640, min(len(_diags) * 16 + 4, 200)), pygame.SRCALPHA)
-                _bg.fill((0, 0, 0, 200))
-                screen.blit(_bg, (0, 0))
-                for i, line in enumerate(_diags[:12]):
-                    txt = _font.render(line[:80], True, (255, 255, 0))
-                    screen.blit(txt, (2, i * 16 + 2))
 
             pygame.display.flip()
 
