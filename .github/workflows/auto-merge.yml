@@ -73,6 +73,10 @@ jobs:
       - name: Build pygame app for web
         run: python -m pygbag --build main.py
 
+      - name: Patch browserfs CDN URL
+        run: |
+          sed -i 's|https://pygame-web.github.io/cdn/0.9.3//browserfs.min.js|https://cdn.jsdelivr.net/npm/browserfs@1.4.3/dist/browserfs.min.js|g' build/web/index.html
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

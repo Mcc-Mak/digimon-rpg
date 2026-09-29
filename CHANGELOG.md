@@ -3,6 +3,61 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.11.0 - 2026-09-29
+
+### Added
+
+- `core/animator.py` — Frame-based sprite animation system:
+  - `AnimationState` enum with five states: `IDLE` (vertical bob,
+    looping), `WALK` (bounce + sway, looping), `ATTACK` (forward lunge
+    + recoil, one-shot), `HURT` (red tint + shake, one-shot), `FAINT`
+    (drop + fade, one-shot).
+  - Each state generates 4 procedural frames from the base sprite using
+    only `pygame.Surface` / `pygame.draw` / `pygame.transform` (WASM-safe).
+  - `Animator` class tracks state and time, returns the correct frame on
+    each `update()`. Non-looping animations hold their last frame when
+    finished.
+  - `get_frames()` caches frames per `(species_key, facing, state)`.
+
+- `tests/test_animator.py` — 30 tests covering frame generation, caching,
+  facing, animator state transitions, playback (loop/finish/hold), and
+  frame content (bob, lunge, tint, fade).
+
+### Changed
+
+- `scenes/battle_scene.py` — Integrated animator for combatant sprites:
+  - Player and enemy each get an `Animator` instance (right/left facing).
+  - Attack actions trigger `ATTACK` animation on the attacker; the
+    defender receives `HURT` after a 0.25s delay via an animation queue.
+  - Battle end triggers `FAINT` on the loser.
+  - `_draw_combatants()` now blits `anim.current_frame` instead of a
+    static cached sprite; non-looping animations revert to `IDLE` when
+    finished (except `FAINT`).
+  - Removed unused `get_battle_sprite` import and `_combatant_cache`.
+
+- `scenes/world_scene.py` — Integrated animator for player avatar:
+  - Player gets an `Animator` initialized with the player's species.
+  - Movement triggers `WALK` animation; returning to idle triggers
+    `IDLE` when the move cooldown expires.
+  - `_draw_player()` blits `anim.current_frame` scaled to 30px wide.
+  - Removed unused `get_world_sprite` import.
+
+- `.github/workflows/auto-merge.yml` — Deploy job patches `browserfs.min.js`
+  URL in `build/web/index.html` from the broken pygbag CDN
+  (`https://pygame-web.github.io/cdn/0.9.3//browserfs.min.js`) to
+  `https://cdn.jsdelivr.net/npm/browserfs@1.4.3/dist/browserfs.min.js`.
+  BrowserFS is the virtual filesystem pygbag uses for file I/O in WASM;
+  without it, `pygame.image.load()` cannot read packed PNG assets in the
+  browser. The merge job is unchanged.
+
+- `doc/Schema.md` — Bumped to v0.6.0; documented the animation system
+  (states, frame counts, durations, caching, integration points).
+
+### Verification
+
+- All 101 tests pass (`pytest tests/ -v`).
+- pygbag build succeeds (189 files packed, 140 PNGs included).
+
 ## 0.10.0 - 2026-09-29
 
 ### Changed

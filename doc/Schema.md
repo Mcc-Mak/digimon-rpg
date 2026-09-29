@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Document** | Schema.md |
-| **Version** | 0.5.0 |
+| **Version** | 0.6.0 |
 | **Date** | 2026-09-29 |
 | **Status** | Approved |
 | **Dependencies** | [ER.md](ER.md), [PRD.md](PRD.md), [Architecture.md](Architecture.md) |
@@ -736,6 +736,21 @@ decodes PNGs natively); if the load fails (e.g. desktop without
 SDL2_image), it falls back to procedural drawing. The 12 hand-crafted
 species have dedicated procedural drawers, and the 128 expanded species
 use the element-tinted generic fallback.
+
+**Animation system:** `core/animator.py` provides frame-based sprite
+animation using procedurally generated frames derived from the base
+sprite surface. The `AnimationState` enum defines five states: `IDLE`
+(gentle vertical bob, looping), `WALK` (bouncier bob with sway, looping),
+`ATTACK` (forward lunge then recoil, one-shot), `HURT` (red tint flash +
+horizontal shake, one-shot), and `FAINT` (drop down + fade out, one-shot).
+Each state has 4 frames with state-specific durations (0.06–0.18s per
+frame). Frames are cached per `(species_key, facing, state)` tuple. The
+`Animator` class tracks state and accumulated time, returning the correct
+frame on each `update()` call. Non-looping animations hold their last
+frame when finished. The battle scene triggers attack/hurt/faint
+animations on turn actions; the world scene switches between idle and
+walk based on player movement. All frame generation uses only
+`pygame.Surface` / `pygame.draw` / `pygame.transform` — WASM-safe, no I/O.
 
 ### 6.2 Skill Definitions
 
