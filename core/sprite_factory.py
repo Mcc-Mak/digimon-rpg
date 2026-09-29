@@ -9,37 +9,34 @@ Under pygbag/WASM the browser decodes PNGs natively via BrowserFS.
 
 from __future__ import annotations
 
+import io
 import os
-from typing import Dict
+from typing import Dict, List
 
 import pygame
 
 from data.digimon_data import Digimon, get_digimon
 
 # ---------------------------------------------------------------------------
-# Browser console logging (falls back to print on desktop)
+# Diagnostics buffer (drawn on-screen by main.py debug overlay)
 # ---------------------------------------------------------------------------
 
-_console = None
+DIAGNOSTICS: List[str] = []
 
 
-def _log(msg: str) -> None:
-    """Log to browser DevTools console (js.console.log) or print on desktop."""
-    global _console
-    if _console is None:
-        try:
-            import js
-            _console = js.console
-        except Exception:
-            _console = False
-    if _console:
-        _console.log(msg)
-    else:
-        print(msg, flush=True)
+def get_diagnostics() -> List[str]:
+    """Return a copy of the accumulated diagnostic messages."""
+    return list(DIAGNOSTICS)
+
+
+def _diag(msg: str) -> None:
+    """Append a diagnostic message and also print it (goes to xterm in WASM)."""
+    DIAGNOSTICS.append(msg)
+    print(msg, flush=True)
 
 
 # ---------------------------------------------------------------------------
-# Sprite directory auto-detection
+# Sprite loading
 # ---------------------------------------------------------------------------
 
 #: Evolution stage -> numeric suffix used in PNG filenames.
@@ -49,52 +46,48 @@ _STAGE_NUM: Dict[str, int] = {
     "Ultimate": 3,
 }
 
-#: Candidate directories to search for creature PNG sprites.
-_SPRITE_CANDIDATES = [
-    os.path.join("assets", "sprites", "creatures"),
-    os.path.join("assets", "assets", "sprites", "creatures"),
-    os.path.join("sprites", "creatures"),
+#: Candidate relative paths for the sprite directory.
+#: pygbag's archive mount can create different CWD layouts, so we try
+#: all of these when loading a sprite.
+_SPRITE_PATH_CANDIDATES = [
+    "assets/sprites/creatures",
+    "assets/assets/sprites/creatures",
     "sprites/creatures",
 ]
-
-
-def _find_sprite_dir() -> str | None:
-    """Search for the directory containing creature PNG sprites.
-
-    Under pygbag/WASM the CWD and archive mount point may differ from
-    desktop, so we probe several candidate paths and pick the first one
-    that contains at least one ``.png`` file.
-    """
-    _log(f"[sprite] CWD = {os.getcwd()}")
-    try:
-        entries = os.listdir(".")
-        _log(f"[sprite] CWD listing: {entries}")
-    except Exception as exc:
-        _log(f"[sprite] CWD listing failed: {exc}")
-
-    for candidate in _SPRITE_CANDIDATES:
-        try:
-            files = os.listdir(candidate)
-            pngs = [f for f in files if f.endswith(".png")]
-            _log(f"[sprite] {candidate}: {len(pngs)} PNGs found")
-            if pngs:
-                _log(f"[sprite] Using sprite dir: {candidate}")
-                return candidate
-        except Exception:
-            _log(f"[sprite] {candidate}: not found / not readable")
-
-    _log("[sprite] WARNING: no sprite directory found!")
-    return None
-
-
-_SPRITE_DIR: str | None = _find_sprite_dir()
-
 
 #: species_key -> base sprite (facing right).
 _CACHE: Dict[str, pygame.Surface] = {}
 
 #: "species_key|facing" -> battle sprite (optionally flipped / scaled).
 _BATTLE_CACHE: Dict[str, pygame.Surface] = {}
+
+#: Tracks whether we've logged the CWD / path diagnostics already.
+_DIAG_INITIALIZED: bool = False
+
+
+def _init_diagnostics() -> None:
+    """Log CWD and directory listing once (lazily on first sprite load)."""
+    global _DIAG_INITIALIZED
+    if _DIAG_INITIALIZED:
+        return
+    _DIAG_INITIALIZED = True
+    try:
+        cwd = os.getcwd()
+    except Exception as exc:
+        cwd = f"<error: {exc}>"
+    _diag(f"[sprite] CWD={cwd}")
+    try:
+        entries = os.listdir(".")
+        _diag(f"[sprite] CWD entries: {entries}")
+    except Exception as exc:
+        _diag(f"[sprite] CWD listdir error: {exc}")
+    for cand in _SPRITE_PATH_CANDIDATES:
+        try:
+            files = os.listdir(cand)
+            pngs = [f for f in files if f.endswith(".png")]
+            _diag(f"[sprite] {cand}: {len(pngs)} PNGs")
+        except Exception:
+            _diag(f"[sprite] {cand}: not readable")
 
 
 def _error_placeholder(size: int = 56) -> pygame.Surface:
@@ -104,31 +97,63 @@ def _error_placeholder(size: int = 56) -> pygame.Surface:
     return surf
 
 
+def _try_load(path: str) -> pygame.Surface | None:
+    """Try loading a PNG from *path* using two strategies.
+
+    1. Direct ``pygame.image.load(path)``.
+    2. File-object: ``open(path, 'rb')`` + ``pygame.image.load(BytesIO)``.
+
+    Returns the surface or ``None``.
+    """
+    # Strategy 1: direct path load
+    try:
+        surf = pygame.image.load(path)
+        _diag(f"[sprite] OK (direct): {path} {surf.get_size()}")
+        return surf
+    except Exception as exc:
+        _diag(f"[sprite] direct fail: {path} -> {exc}")
+
+    # Strategy 2: file-object load
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+        _diag(f"[sprite] read {len(data)} bytes from {path}")
+        surf = pygame.image.load(io.BytesIO(data))
+        _diag(f"[sprite] OK (fileobj): {path} {surf.get_size()}")
+        return surf
+    except Exception as exc:
+        _diag(f"[sprite] fileobj fail: {path} -> {exc}")
+
+    return None
+
+
 def _load_png_sprite(species: Digimon) -> pygame.Surface | None:
     """Load a PNG sprite for *species*.
 
-    Returns the loaded surface (with per-pixel alpha) or ``None`` if the
-    file is missing or cannot be decoded.
+    Tries multiple candidate directories and two loading strategies.
+    Returns the loaded surface (with per-pixel alpha) or ``None``.
     """
+    _init_diagnostics()
+
     stage_num = _STAGE_NUM.get(species.stage)
     if stage_num is None:
-        _log(f"[sprite] No stage mapping for {species.key} ({species.stage})")
+        _diag(f"[sprite] No stage mapping for {species.key} ({species.stage})")
         return None
-    if _SPRITE_DIR is None:
-        _log(f"[sprite] No sprite dir — cannot load {species.key}")
-        return None
-    path = os.path.join(_SPRITE_DIR, f"{species.key}_{stage_num}.png")
-    try:
-        surf = pygame.image.load(path)
-    except Exception as exc:
-        _log(f"[sprite] PNG load failed: {path} -> {exc}")
-        return None
-    try:
-        surf = surf.convert_alpha()
-    except Exception:
-        pass
-    _log(f"[sprite] PNG OK: {path} {surf.get_size()}")
-    return surf
+
+    filename = f"{species.key}_{stage_num}.png"
+
+    for base in _SPRITE_PATH_CANDIDATES:
+        path = os.path.join(base, filename)
+        surf = _try_load(path)
+        if surf is not None:
+            try:
+                surf = surf.convert_alpha()
+            except Exception:
+                pass
+            return surf
+
+    _diag(f"[sprite] All paths failed for {species.key}")
+    return None
 
 
 def get_sprite(name: str) -> pygame.Surface:
@@ -149,7 +174,7 @@ def get_sprite(name: str) -> pygame.Surface:
     try:
         species = get_digimon(key)
     except KeyError:
-        _log(f"[sprite] Unknown species: {key}")
+        _diag(f"[sprite] Unknown species: {key}")
         surf = _error_placeholder()
         _CACHE[key] = surf
         return surf
@@ -219,4 +244,6 @@ __all__ = [
     "get_battle_sprite",
     "get_world_sprite",
     "clear_cache",
+    "get_diagnostics",
+    "DIAGNOSTICS",
 ]
