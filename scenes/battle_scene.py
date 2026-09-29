@@ -5,7 +5,9 @@ and a scrolling battle log. Integrates with ``systems.battle.BattleEngine``
 for all combat logic. On win, awards XP and returns to the world scene; on
 loss, returns to the title scene.
 
-All rendering uses ``pygame.draw`` and ``pygame.font`` — no external assets.
+Sprites are animated via :class:`core.animator.Animator` — idle bob,
+attack lunge, hurt flash, and faint animations are generated procedurally
+from the base sprite.
 
 WASM safety: no blocking I/O, no subprocess. Safe under pygbag/WASM.
 """
@@ -13,13 +15,13 @@ WASM safety: no blocking I/O, no subprocess. Safe under pygbag/WASM.
 from __future__ import annotations
 
 import random
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 import pygame
 
 import config
 from core.scene import Scene
-from core.sprite_factory import get_battle_sprite
+from core.animator import Animator, AnimationState
 from systems.battle import BattleEngine, BattleDigimon, BattleResult
 from systems.progression import check_level_up, xp_to_reach_level
 
@@ -58,9 +60,12 @@ class BattleScene(Scene):
         self._font_md: pygame.font.Font = pygame.font.Font(None, 22)
         self._font_sm: pygame.font.Font = pygame.font.Font(None, 18)
 
-        # Cache for level-scaled combatant sprites so we don't re-scale every
-        # frame. Keyed by (species, facing, scale_bucket).
-        self._combatant_cache: dict = {}
+        # Animators for player (right-facing) and enemy (left-facing).
+        self._player_anim = Animator(player_species, facing="right")
+        self._enemy_anim = Animator(enemy_species, facing="left")
+
+        # Scheduled animation state changes: list of (delay, animator, state).
+        self._anim_queue: List[Tuple[float, Animator, AnimationState]] = []
 
     def enter(self) -> None:
         pass
@@ -93,6 +98,20 @@ class BattleScene(Scene):
     def update(self, dt: float) -> None:
         if self._flash_timer > 0:
             self._flash_timer -= dt
+
+        # Advance animation timers.
+        self._player_anim.update(dt)
+        self._enemy_anim.update(dt)
+
+        # Process scheduled animation state changes.
+        remaining: List[Tuple[float, Animator, AnimationState]] = []
+        for delay, anim, state in self._anim_queue:
+            delay -= dt
+            if delay <= 0:
+                anim.play(state)
+            else:
+                remaining.append((delay, anim, state))
+        self._anim_queue = remaining
 
         if self._awaiting_enemy:
             self._enemy_delay -= dt
@@ -128,8 +147,13 @@ class BattleScene(Scene):
     def _player_action(self, move_index: int) -> None:
         result = self._engine.player_attack(move_index)
         self._add_log(str(result["message"]))
+
+        # Player lunges forward to attack.
+        self._player_anim.play(AnimationState.ATTACK)
         if result.get("effect") == "damage":
             self._trigger_flash((255, 80, 80))
+            # Enemy takes the hit after a short delay.
+            self._anim_queue.append((0.25, self._enemy_anim, AnimationState.HURT))
 
         winner = self._engine.check_battle_end()
         if winner is not None:
@@ -149,8 +173,13 @@ class BattleScene(Scene):
     def _do_enemy_turn(self) -> None:
         result = self._engine.enemy_turn()
         self._add_log(str(result["message"]))
+
+        # Enemy lunges forward to attack.
+        self._enemy_anim.play(AnimationState.ATTACK)
         if result.get("effect") == "damage":
             self._trigger_flash((80, 80, 255))
+            # Player takes the hit after a short delay.
+            self._anim_queue.append((0.25, self._player_anim, AnimationState.HURT))
 
         winner = self._engine.check_battle_end()
         if winner is not None:
@@ -163,8 +192,10 @@ class BattleScene(Scene):
             xp = self._engine.award_xp()
             self._add_log(f"Victory! Gained {xp} XP!")
             self._award_xp(xp)
+            self._enemy_anim.play(AnimationState.FAINT)
         elif winner == "enemy":
             self._add_log("Defeat...")
+            self._player_anim.play(AnimationState.FAINT)
 
     def _award_xp(self, xp: int) -> None:
         player_level = getattr(self.game, "_player_level", 5)
@@ -207,36 +238,34 @@ class BattleScene(Scene):
         p = self._engine.player
         e = self._engine.enemy
 
-        # Player on the left platform (feet rest near platform center y=288),
-        # enemy on the right platform (y=188), flipped to face the player.
-        self._blit_combatant(screen, p.species_name, 120, 290, "right", p.level)
-        self._blit_combatant(screen, e.species_name, 520, 190, "left", e.level)
+        # Player on the left platform (feet rest near platform center y=290),
+        # enemy on the right platform (y=190), facing the player.
+        self._blit_combatant(screen, self._player_anim, 120, 290, p.level)
+        self._blit_combatant(screen, self._enemy_anim, 520, 190, e.level)
+
+        # Revert non-looping animations to idle once they finish.
+        for anim in (self._player_anim, self._enemy_anim):
+            if anim.finished and anim.state not in (AnimationState.FAINT,):
+                anim.play(AnimationState.IDLE)
 
     def _blit_combatant(
         self,
         screen: pygame.Surface,
-        species: str,
+        anim: Animator,
         x: int,
         bottom_y: int,
-        facing: str,
         level: int,
     ) -> None:
-        """Draw a grounded creature sprite with a soft drop shadow.
+        """Draw an animated combatant sprite with a soft drop shadow.
 
         The sprite is scaled up slightly with level (clamped) so higher-level
-        combatants read as heftier. Scaled sprites are cached per battle.
+        combatants read as heftier.
         """
         scale = max(1.0, min(1.35, 1.0 + (max(1, level) - 1) * 0.015))
-        # Bucket the scale to the nearest 5% so the cache stays tiny.
-        bucket = round(scale * 20) / 20
-        cache_key = (species, facing, bucket)
-        scaled = self._combatant_cache.get(cache_key)
-        if scaled is None:
-            base = get_battle_sprite(species, facing=facing)
-            w = max(1, int(base.get_width() * bucket))
-            h = max(1, int(base.get_height() * bucket))
-            scaled = pygame.transform.scale(base, (w, h))
-            self._combatant_cache[cache_key] = scaled
+        base = anim.current_frame
+        w = max(1, int(base.get_width() * scale))
+        h = max(1, int(base.get_height() * scale))
+        scaled = pygame.transform.scale(base, (w, h))
 
         # Soft drop shadow on the platform.
         sw = scaled.get_width()

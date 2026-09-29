@@ -4,7 +4,8 @@ The player explores a grid-based map using arrow keys or WASD. Stepping on
 grass tiles can trigger wild Digimon encounters via the encounter system.
 An NPC provides dialogue when interacted with.
 
-All rendering uses ``pygame.draw`` primitives — no external image assets.
+The player avatar is animated via :class:`core.animator.Animator` — idle
+bob when standing still, walk bounce when moving.
 
 WASM safety: no blocking I/O, no subprocess, no file reads. The tile map is
 defined in-code as a list of strings. Safe under pygbag/WASM.
@@ -19,7 +20,7 @@ import pygame
 
 import config
 from core.scene import Scene
-from core.sprite_factory import get_world_sprite
+from core.animator import Animator, AnimationState
 from systems.encounter import check_encounter, ZONES
 
 # Tile size in pixels.
@@ -117,6 +118,10 @@ class WorldScene(Scene):
         self._font: pygame.font.Font = pygame.font.Font(None, 24)
         self._small_font: pygame.font.Font = pygame.font.Font(None, 18)
 
+        # Player avatar animator.
+        species = getattr(game, "_player_species", "emberling")
+        self._player_anim = Animator(species, facing="right")
+
     def enter(self) -> None:
         self._move_timer = 0.0
 
@@ -134,8 +139,11 @@ class WorldScene(Scene):
     def update(self, dt: float) -> None:
         if self._move_timer > 0:
             self._move_timer -= dt
+            if self._move_timer <= 0:
+                self._player_anim.play(AnimationState.IDLE)
         if self._dialogue_timer > 0:
             self._dialogue_timer -= dt
+        self._player_anim.update(dt)
 
     def draw(self, screen: pygame.Surface) -> None:
         screen.fill(config.BLACK)
@@ -164,8 +172,11 @@ class WorldScene(Scene):
         self._player_y = ny
         if dx < 0:
             self._facing = "left"
+            self._player_anim.set_facing("left")
         elif dx > 0:
             self._facing = "right"
+            self._player_anim.set_facing("right")
+        self._player_anim.play(AnimationState.WALK)
         self._move_timer = _MOVE_COOLDOWN
         self._check_encounter(tile)
 
@@ -229,8 +240,14 @@ class WorldScene(Scene):
                     pygame.draw.circle(screen, config.WHITE, (cx, cy - 12), 6)
 
     def _draw_player(self, screen: pygame.Surface) -> None:
-        species = getattr(self.game, "_player_species", "emberling")
-        sprite = get_world_sprite(species, size=30, facing=self._facing)
+        frame = self._player_anim.current_frame
+        # Scale the animation frame to fit a 30px-wide box, preserving
+        # aspect ratio so the creature is not stretched.
+        target_w = 30
+        scale = target_w / max(1, frame.get_width())
+        target_h = max(1, int(frame.get_height() * scale))
+        sprite = pygame.transform.scale(frame, (target_w, target_h))
+
         px = self._player_x * _TILE_SIZE + _TILE_SIZE // 2
         py = self._player_y * _TILE_SIZE + _TILE_SIZE - 2
         # Soft drop shadow under the avatar.
