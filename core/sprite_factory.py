@@ -16,8 +16,31 @@ import pygame
 
 from data.digimon_data import Digimon, get_digimon
 
-#: Directory containing creature PNG sprites.
-_SPRITE_DIR = os.path.join("assets", "sprites", "creatures")
+# ---------------------------------------------------------------------------
+# Browser console logging (falls back to print on desktop)
+# ---------------------------------------------------------------------------
+
+_console = None
+
+
+def _log(msg: str) -> None:
+    """Log to browser DevTools console (js.console.log) or print on desktop."""
+    global _console
+    if _console is None:
+        try:
+            import js
+            _console = js.console
+        except Exception:
+            _console = False
+    if _console:
+        _console.log(msg)
+    else:
+        print(msg, flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Sprite directory auto-detection
+# ---------------------------------------------------------------------------
 
 #: Evolution stage -> numeric suffix used in PNG filenames.
 _STAGE_NUM: Dict[str, int] = {
@@ -25,6 +48,47 @@ _STAGE_NUM: Dict[str, int] = {
     "Champion": 2,
     "Ultimate": 3,
 }
+
+#: Candidate directories to search for creature PNG sprites.
+_SPRITE_CANDIDATES = [
+    os.path.join("assets", "sprites", "creatures"),
+    os.path.join("assets", "assets", "sprites", "creatures"),
+    os.path.join("sprites", "creatures"),
+    "sprites/creatures",
+]
+
+
+def _find_sprite_dir() -> str | None:
+    """Search for the directory containing creature PNG sprites.
+
+    Under pygbag/WASM the CWD and archive mount point may differ from
+    desktop, so we probe several candidate paths and pick the first one
+    that contains at least one ``.png`` file.
+    """
+    _log(f"[sprite] CWD = {os.getcwd()}")
+    try:
+        entries = os.listdir(".")
+        _log(f"[sprite] CWD listing: {entries}")
+    except Exception as exc:
+        _log(f"[sprite] CWD listing failed: {exc}")
+
+    for candidate in _SPRITE_CANDIDATES:
+        try:
+            files = os.listdir(candidate)
+            pngs = [f for f in files if f.endswith(".png")]
+            _log(f"[sprite] {candidate}: {len(pngs)} PNGs found")
+            if pngs:
+                _log(f"[sprite] Using sprite dir: {candidate}")
+                return candidate
+        except Exception:
+            _log(f"[sprite] {candidate}: not found / not readable")
+
+    _log("[sprite] WARNING: no sprite directory found!")
+    return None
+
+
+_SPRITE_DIR: str | None = _find_sprite_dir()
+
 
 #: species_key -> base sprite (facing right).
 _CACHE: Dict[str, pygame.Surface] = {}
@@ -48,19 +112,22 @@ def _load_png_sprite(species: Digimon) -> pygame.Surface | None:
     """
     stage_num = _STAGE_NUM.get(species.stage)
     if stage_num is None:
-        print(f"[sprite] No stage mapping for {species.key} ({species.stage})", flush=True)
+        _log(f"[sprite] No stage mapping for {species.key} ({species.stage})")
+        return None
+    if _SPRITE_DIR is None:
+        _log(f"[sprite] No sprite dir — cannot load {species.key}")
         return None
     path = os.path.join(_SPRITE_DIR, f"{species.key}_{stage_num}.png")
     try:
         surf = pygame.image.load(path)
     except Exception as exc:
-        print(f"[sprite] PNG load failed: {path} (cwd={os.getcwd()}) -> {exc}", flush=True)
+        _log(f"[sprite] PNG load failed: {path} -> {exc}")
         return None
     try:
         surf = surf.convert_alpha()
     except Exception:
         pass
-    print(f"[sprite] PNG loaded OK: {path} {surf.get_size()}", flush=True)
+    _log(f"[sprite] PNG OK: {path} {surf.get_size()}")
     return surf
 
 
@@ -82,7 +149,7 @@ def get_sprite(name: str) -> pygame.Surface:
     try:
         species = get_digimon(key)
     except KeyError:
-        print(f"[sprite] Unknown species: {key}", flush=True)
+        _log(f"[sprite] Unknown species: {key}")
         surf = _error_placeholder()
         _CACHE[key] = surf
         return surf

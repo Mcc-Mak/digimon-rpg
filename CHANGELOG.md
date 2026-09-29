@@ -3,6 +3,23 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.15.0 - 2026-09-29
+
+### Fixed
+
+- `core/sprite_factory.py` — Rewrote sprite loading for WASM diagnostics:
+  - **Browser console logging**: All sprite log messages now go to
+    `js.console.log()` (browser DevTools console) instead of `print()`
+    (which only appears in pygbag's xterm terminal and was invisible
+    in DevTools).
+  - **Sprite directory auto-detection**: `_find_sprite_dir()` probes
+    multiple candidate paths (`assets/sprites/creatures`,
+    `assets/assets/sprites/creatures`, `sprites/creatures`) and picks
+    the first containing PNGs. This handles the doubled-`assets/`
+    path that pygbag's archive mount can create.
+  - **CWD and directory listing logged at import time** so the browser
+    console shows exactly where the WASM filesystem looks for sprites.
+
 ## 0.14.0 - 2026-09-29
 
 ### Fixed
