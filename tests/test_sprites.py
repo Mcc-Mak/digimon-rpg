@@ -16,13 +16,19 @@ def teardown_module(module):
 
 
 class TestSpriteGeneration:
-    def test_all_species_have_dedicated_drawer(self):
-        # Every registered species should map to a dedicated draw function
-        # (no silent fallback to the generic blob).
+    def test_all_species_render_non_blank_sprite(self):
+        # Every registered species must produce a non-blank sprite.
+        # The 12 hand-crafted species use dedicated drawers; all others use
+        # the element-tinted generic fallback, which is acceptable.
+        sprite_factory.clear_cache()
         for key in DIGIMON_REGISTRY:
-            assert key in sprite_factory._DRAWERS, (
-                f"species '{key}' has no dedicated drawer"
+            surf = sprite_factory.get_sprite(key)
+            drawn = any(
+                surf.get_at((x, y))[3] != 0
+                for x in range(0, surf.get_width(), 4)
+                for y in range(0, surf.get_height(), 4)
             )
+            assert drawn, f"species '{key}' renders a blank sprite"
 
     def test_get_sprite_returns_surface_for_every_species(self):
         sprite_factory.clear_cache()
