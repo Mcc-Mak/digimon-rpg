@@ -1,7 +1,8 @@
 """Tests for the frame-based animation system (core/animator.py).
 
-Tests force the procedural sprite rendering path so they are deterministic
-regardless of whether SDL2_image / PNG support is available on the host.
+Tests monkeypatch ``sprite_factory._load_png_sprite`` to return synthetic
+surfaces so they are deterministic regardless of whether SDL2_image / PNG
+support is available on the host.
 """
 
 import pygame
@@ -18,14 +19,20 @@ from core.animator import (
 )
 
 
+def _fake_png(species):
+    surf = pygame.Surface((50, 50), pygame.SRCALPHA)
+    surf.fill((100, 150, 200))
+    pygame.draw.circle(surf, (255, 0, 0), (25, 25), 15)
+    pygame.draw.rect(surf, (0, 255, 0), (30, 20, 10, 5))
+    return surf
+
+
 def setup_module(module):
-    """pygame.draw needs pygame to be initialized before use."""
     pygame.init()
-    sprite_factory._FORCE_PROCEDURAL = True
+    sprite_factory._load_png_sprite = _fake_png
 
 
 def teardown_module(module):
-    sprite_factory._FORCE_PROCEDURAL = False
     pygame.quit()
 
 

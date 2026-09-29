@@ -3,6 +3,39 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.13.0 - 2026-09-29
+
+### Changed
+
+- `core/sprite_factory.py` — Removed all procedural sprite drawing:
+  - Deleted all `_draw_*` functions (12 species-specific + 7
+    element-generic), helper functions (`_darken`, `_lighten`,
+    `_soft_disc`, `_draw_eyes`, `_draw_flame`, `_draw_droplet`,
+    `_draw_lightning`, `_draw_thorn`), color palettes
+    (`_ELEMENT_PALETTE`), stage-size tables (`_STAGE_SIZE`,
+    `_DEFAULT_SIZE`), and the `_DRAWERS` / `_ELEMENT_DRAWERS`
+    dispatch dicts.
+  - Deleted `_FORCE_PROCEDURAL` flag — no longer needed.
+  - `get_sprite()` now loads PNGs exclusively. If a PNG is missing or
+    fails to decode, a solid magenta error placeholder is returned so
+    the failure is immediately visible (not hidden behind a circle).
+  - `_load_png_sprite()` retains debug `print()` output for browser
+    console diagnosis.
+
+- `tests/test_sprites.py` — Replaced `_FORCE_PROCEDURAL = True` with a
+  monkeypatch of `_load_png_sprite` that returns synthetic surfaces.
+  Fake PNGs are asymmetric so left/right flip tests still work.
+
+- `tests/test_animator.py` — Same monkeypatch approach as test_sprites.
+
+- `doc/Schema.md` — Bumped to v0.7.1; updated sprite system description
+  to reflect PNG-only model (no procedural fallback).
+
+### Verification
+
+- All 101 tests pass (`pytest tests/ -v`).
+- pygbag build succeeds (189 files packed, 140 PNGs included).
+
 ## 0.12.0 - 2026-09-29
 
 ### Added
