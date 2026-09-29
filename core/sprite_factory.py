@@ -19,6 +19,7 @@ from typing import Dict, List
 
 import pygame
 
+from core.wasm_log import browser_log
 from data.digimon_data import Digimon, get_digimon
 
 # ---------------------------------------------------------------------------
@@ -34,9 +35,10 @@ def get_diagnostics() -> List[str]:
 
 
 def _diag(msg: str) -> None:
-    """Append a diagnostic message and also print it (goes to xterm in WASM)."""
+    """Append a diagnostic message and also log it to the browser console."""
     DIAGNOSTICS.append(msg)
     print(msg, flush=True)
+    browser_log(msg)
 
 
 # ---------------------------------------------------------------------------
