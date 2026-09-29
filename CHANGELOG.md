@@ -3,7 +3,34 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
-## 0.15.0 - 2026-09-29
+## 0.16.0 - 2026-09-29
+
+### Changed
+
+- `core/sprite_factory.py` — Rewrote sprite loading for WASM robustness:
+  - **Lazy initialization**: Sprite directory detection now happens on
+    first sprite load, not at module import time. This avoids running
+    filesystem checks before pygbag has fully mounted the archive.
+  - **Multiple path candidates**: Tries `assets/sprites/creatures`,
+    `assets/assets/sprites/creatures`, and `sprites/creatures` for
+    each sprite, covering different CWD layouts pygbag may produce.
+  - **File-object fallback**: If `pygame.image.load(path)` fails, tries
+    `open(path, "rb")` + `pygame.image.load(io.BytesIO(data))`. This
+    uses Python's file I/O layer which may work when SDL2's C-level
+    file I/O doesn't in the BrowserFS virtual filesystem.
+  - **On-screen diagnostics**: All diagnostic messages are stored in a
+    global `DIAGNOSTICS` list (exposed via `get_diagnostics()`).
+
+- `main.py` — Added a debug overlay that draws the last 12 sprite
+  diagnostic messages at the top-left of the game canvas. This is
+  necessary because pygbag redirects both `print()` and
+  `js.console.log()` to its xterm terminal, NOT the browser DevTools
+  console — making console-based debugging invisible to the user.
+
+### Verification
+
+- All 101 tests pass.
+- pygbag build succeeds.
 
 ### Fixed
 
