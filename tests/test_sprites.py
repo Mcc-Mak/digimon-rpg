@@ -1,4 +1,8 @@
-"""Tests for the procedural creature sprite factory (core/sprite_factory.py)."""
+"""Tests for the creature sprite factory (core/sprite_factory.py).
+
+Tests force the procedural rendering path so they are deterministic
+regardless of whether SDL2_image / PNG support is available on the host.
+"""
 
 import pygame
 
@@ -9,9 +13,11 @@ from core import sprite_factory
 def setup_module(module):
     """pygame.draw needs pygame to be initialized before use."""
     pygame.init()
+    sprite_factory._FORCE_PROCEDURAL = True
 
 
 def teardown_module(module):
+    sprite_factory._FORCE_PROCEDURAL = False
     pygame.quit()
 
 

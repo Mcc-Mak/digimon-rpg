@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Document** | Schema.md |
-| **Version** | 0.4.0 |
+| **Version** | 0.5.0 |
 | **Date** | 2026-09-29 |
 | **Status** | Approved |
 | **Dependencies** | [ER.md](ER.md), [PRD.md](PRD.md), [Architecture.md](Architecture.md) |
@@ -729,10 +729,13 @@ won. Champion → Ultimate requires level 25 + 15 battles won + 1 boss defeat.
 
 **Sprite assets:** All 140 species have dedicated PNG sprite files in
 `assets/sprites/creatures/{species_id}_{stage_num}.png`, organized by
-evolution line and element. At runtime, sprites are drawn procedurally via
-`core/sprite_factory.py` (WASM-safe); the 12 hand-crafted species have
-dedicated drawers, and the 128 expanded species use the element-tinted
-generic fallback.
+evolution line and element. At runtime, `core/sprite_factory.py` uses a
+hybrid model: it first attempts to load the PNG via
+`pygame.image.load()` (which works under pygbag/WASM where the browser
+decodes PNGs natively); if the load fails (e.g. desktop without
+SDL2_image), it falls back to procedural drawing. The 12 hand-crafted
+species have dedicated procedural drawers, and the 128 expanded species
+use the element-tinted generic fallback.
 
 ### 6.2 Skill Definitions
 

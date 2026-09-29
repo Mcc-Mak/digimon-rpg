@@ -1,12 +1,21 @@
-"""Procedural creature sprites for digimon-rpg.
+"""Hybrid creature sprites for digimon-rpg.
 
-Each Digimon species gets a unique, recognizable silhouette drawn entirely
-with ``pygame.draw`` primitives onto a transparent ``SRCALPHA`` surface. No
-external image files are loaded, so the module is fully WASM/pygbag-safe and
-follows the project convention of "no external image assets".
+Each Digimon species is rendered from a pre-drawn PNG asset when available,
+falling back to a procedural ``pygame.draw`` silhouette otherwise. This keeps
+the game fully functional on desktop (where SDL2_image may be absent) while
+leveraging the 140-sprite asset library under pygbag/WASM (where the browser
+decodes PNGs natively).
 
-Design
-------
+Asset lookup
+------------
+
+PNG files live in ``assets/sprites/creatures/`` and follow the naming
+convention ``{species_key}_{stage_num}.png`` where *stage_num* is 1 (Rookie),
+2 (Champion), or 3 (Ultimate). If the file is missing or cannot be decoded,
+the procedural drawer runs instead.
+
+Procedural fallback
+-------------------
 
 * Body color, accent color, and glow color are derived from the species'
   element via :data:`_ELEMENT_PALETTE`.
@@ -15,15 +24,21 @@ Design
 * A per-species draw function (registered in :data:`_DRAWERS`) paints the
   creature. Species without a dedicated drawer fall back to a generic
   elemental blob so rendering never crashes on an unknown name.
-* Surfaces are cached: the first call builds the sprite, later calls return
-  the cached instance. Battle sprites are cached per facing direction.
 
-WASM safety: only ``pygame.Surface`` / ``pygame.draw`` / ``pygame.transform``
-are used. No I/O, no subprocess, no threads.
+Caching
+-------
+
+Surfaces are cached: the first call builds the sprite, later calls return
+the cached instance. Battle sprites are cached per facing direction.
+
+WASM safety: ``pygame.image.load`` is the only I/O call and is wrapped in
+try/except so failures degrade gracefully to procedural drawing. No subprocess,
+no threads.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Callable, Dict, Tuple
 
 import pygame
@@ -59,6 +74,21 @@ _STAGE_SIZE: Dict[str, int] = {
 }
 
 _DEFAULT_SIZE: int = 56
+
+#: Evolution stage -> numeric suffix used in PNG filenames.
+_STAGE_NUM: Dict[str, int] = {
+    "Rookie": 1,
+    "Champion": 2,
+    "Ultimate": 3,
+}
+
+#: Directory containing creature PNG sprites.
+_SPRITE_DIR = os.path.join("assets", "sprites", "creatures")
+
+#: When True, skip PNG loading and always use procedural drawing. Tests set
+#: this to True so they exercise the deterministic procedural path regardless
+#: of whether SDL2_image is installed on the host.
+_FORCE_PROCEDURAL: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -536,8 +566,41 @@ def _size_for(stage: str) -> int:
     return _STAGE_SIZE.get(stage, _DEFAULT_SIZE)
 
 
+def _load_png_sprite(species: Digimon) -> pygame.Surface | None:
+    """Attempt to load a PNG sprite for *species*.
+
+    Returns the loaded surface (with per-pixel alpha) or ``None`` if the
+    file is missing or cannot be decoded. Under pygbag/WASM the browser's
+    native PNG decoder handles the load; on desktop without SDL2_image the
+    call raises and ``None`` is returned so the caller falls back to
+    procedural drawing.
+    """
+    if _FORCE_PROCEDURAL:
+        return None
+    stage_num = _STAGE_NUM.get(species.stage)
+    if stage_num is None:
+        return None
+    path = os.path.join(_SPRITE_DIR, f"{species.key}_{stage_num}.png")
+    try:
+        surf = pygame.image.load(path)
+    except Exception:
+        return None
+    try:
+        surf = surf.convert_alpha()
+    except Exception:
+        pass
+    return surf
+
+
 def _build_sprite(species: Digimon) -> pygame.Surface:
-    """Build (but not cache) the base sprite surface for a species."""
+    """Build (but not cache) the base sprite surface for a species.
+
+    Tries the PNG asset first; if that fails, falls back to the procedural
+    drawer so rendering never crashes.
+    """
+    png = _load_png_sprite(species)
+    if png is not None:
+        return png
     S = _size_for(species.stage)
     body, accent, glow = _palette_for(species.element)
     surf = pygame.Surface((S, S), pygame.SRCALPHA)
