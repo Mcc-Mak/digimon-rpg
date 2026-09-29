@@ -51,13 +51,10 @@ def _load_png_sprite(species: Digimon) -> pygame.Surface | None:
         print(f"[sprite] No stage mapping for {species.key} ({species.stage})", flush=True)
         return None
     path = os.path.join(_SPRITE_DIR, f"{species.key}_{stage_num}.png")
-    if not os.path.exists(path):
-        print(f"[sprite] PNG not found: {path}  (cwd={os.getcwd()})", flush=True)
-        return None
     try:
         surf = pygame.image.load(path)
     except Exception as exc:
-        print(f"[sprite] PNG load failed: {path} -> {exc}", flush=True)
+        print(f"[sprite] PNG load failed: {path} (cwd={os.getcwd()}) -> {exc}", flush=True)
         return None
     try:
         surf = surf.convert_alpha()
