@@ -3,6 +3,22 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.14.0 - 2026-09-29
+
+### Fixed
+
+- `core/sprite_factory.py` — Removed `os.path.exists()` guard from
+  `_load_png_sprite()`. Under pygbag/WASM, `os.path.exists()` returns
+  `False` for files in the BrowserFS virtual filesystem, causing every
+  PNG to be rejected before `pygame.image.load()` was ever called. Now
+  the code attempts `pygame.image.load()` directly and only falls back
+  to the error placeholder if the load raises an exception.
+
+### Verification
+
+- All 101 tests pass (`pytest tests/ -v`).
+- pygbag build succeeds (189 files packed, 140 PNGs included).
+
 ## 0.13.0 - 2026-09-29
 
 ### Changed
