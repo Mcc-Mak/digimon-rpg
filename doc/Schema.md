@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | **Document** | Schema.md |
-| **Version** | 0.3.0 |
-| **Date** | 2026-09-28 |
+| **Version** | 0.4.0 |
+| **Date** | 2026-09-29 |
 | **Status** | Approved |
 | **Dependencies** | [ER.md](ER.md), [PRD.md](PRD.md), [Architecture.md](Architecture.md) |
 
@@ -114,7 +114,9 @@ class SpeciesDef:
     """Static definition of a creature species.
 
     Corresponds to ER entity: Species (E1).
-    One instance per species (18 total: 6 lines × 3 stages).
+    140 species total: 12 hand-crafted with bespoke stats and
+    descriptions, plus 128 generated from element/stage-templated
+    data tables (see §6.1.1).
     """
     species_id: str              # e.g. "emberling"
     name: str                    # e.g. "Emberling"
@@ -398,10 +400,24 @@ class BattleState:
 
 ## 6. Concrete Data Instances
 
-### 6.1 Roster — All 18 Species
+### 6.1 Roster — All 140 Species
 
 Below are the concrete species definitions. The full Python code lives in
-`src/data/roster.py`.
+`data/digimon_data.py`.
+
+The roster consists of two tiers:
+
+1. **Hand-crafted species (12)** — bespoke stats, descriptions, and
+   procedural sprite drawers. These cover the six original evolution lines
+   (Fire, Water, Nature, Electric, Earth, Dark), each with Rookie →
+   Champion → Ultimate stages. Their full `SpeciesDef` instances are
+   shown below.
+
+2. **Expanded species (128)** — generated at import time from
+   `_EXPANDED_SPECIES_TABLE`, a compact tuple list of
+   `(species_id, stage_num, element, evolution_target)`. Stats, growth
+   rates, moves, and descriptions are templated by element and stage.
+   See §6.1.1 for the template approach and element/stage distribution.
 
 #### Fire Line
 
@@ -526,15 +542,15 @@ SpeciesDef(
     skill_ids=("vine_whip", "leaf_storm", "root_bind", "bloom_burst"),
 )
 
-# Verdant Titan (Ultimate)
+# VerdantTitan (Ultimate)
 SpeciesDef(
-    species_id="verdant_titan", name="Verdant Titan", element=Element.NATURE,
+    species_id="verdanttitan", name="VerdantTitan", element=Element.NATURE,
     stage=Stage.ULTIMATE,
     base_hp=300, base_mp=165, base_attack=72, base_defense=70, base_speed=28,
     hp_growth=0.025, mp_growth=0.040, atk_growth=0.025,
     def_growth=0.030, spd_growth=0.015,
     description="A towering, ancient tree-golem of petrified wood...",
-    sprite_key="verdant_titan_3",
+    sprite_key="verdanttitan_3",
     evolves_from="thornbloom", evolves_to=None,
     evolution_level=0, evolution_battles=0,
     skill_ids=("vine_whip", "leaf_storm", "root_bind", "bloom_burst"),
@@ -678,6 +694,45 @@ SpeciesDef(
     skill_ids=("shadow_poke", "dark_mist", "void_claw", "eclipse_roar"),
 )
 ```
+
+#### 6.1.1 Expanded Roster (128 Templated Species)
+
+The 128 additional species are defined in `_EXPANDED_SPECIES_TABLE` as
+`(species_id, stage_num, element, evolution_target)` tuples and
+generated into `Digimon` instances by `_make_expanded_species()` at
+import time. Stats, growth rates, moves, and descriptions are derived
+from element- and stage-specific templates.
+
+**Distribution by element and stage:**
+
+| Element   | Rookie | Champion | Ultimate | Total |
+|-----------|--------|----------|----------|-------|
+| Fire      | 8      | 7        | 7        | 22    |
+| Water     | 5      | 5        | 4        | 14    |
+| Nature    | 3      | 3        | 4        | 10    |
+| Electric  | 7      | 7        | 7        | 21    |
+| Earth     | 10     | 10       | 10       | 30    |
+| Dark      | 8      | 8        | 8        | 24    |
+| **Total** | **41** | **40**   | **40**   | **128** |
+
+Combined with the 12 hand-crafted species, the full registry contains
+**140 species** across 45 evolution lines and 6 elements.
+
+**Stat templates** (`_STAT_TEMPLATES`) provide base HP/MP/Attack/Defense/Speed
+per element per stage. **Growth rates** (`_GROWTH_RATES`) provide per-element
+HP/MP/ATK/DEF/SPD growth multipliers. **Moves** are shared per element
+(`_ELEMENT_MOVES`), referencing the same move lists as the hand-crafted
+species. **Descriptions** are element-templated (`_ELEMENT_DESCRIPTIONS`).
+
+**Evolution requirements:** Rookie → Champion requires level 10 + 5 battles
+won. Champion → Ultimate requires level 25 + 15 battles won + 1 boss defeat.
+
+**Sprite assets:** All 140 species have dedicated PNG sprite files in
+`assets/sprites/creatures/{species_id}_{stage_num}.png`, organized by
+evolution line and element. At runtime, sprites are drawn procedurally via
+`core/sprite_factory.py` (WASM-safe); the 12 hand-crafted species have
+dedicated drawers, and the 128 expanded species use the element-tinted
+generic fallback.
 
 ### 6.2 Skill Definitions
 
@@ -826,18 +881,42 @@ ZoneDef(
     theme="grassy_fields",
     min_level=1, max_level=12,
     encounter_entries=(
-        EncounterEntryDef(species_id="emberling", weight=0.20,
+        # Original 6 species (reduced weights)
+        EncounterEntryDef(species_id="emberling", weight=0.12,
                           min_level=1, max_level=6, base_xp=25),
-        EncounterEntryDef(species_id="aquapup", weight=0.20,
+        EncounterEntryDef(species_id="aquapup", weight=0.12,
                           min_level=1, max_level=6, base_xp=25),
-        EncounterEntryDef(species_id="seedkit", weight=0.25,
+        EncounterEntryDef(species_id="seedkit", weight=0.10,
                           min_level=2, max_level=8, base_xp=25),
-        EncounterEntryDef(species_id="rockbash", weight=0.15,
+        EncounterEntryDef(species_id="rockbash", weight=0.08,
                           min_level=3, max_level=9, base_xp=25),
-        EncounterEntryDef(species_id="stormwing", weight=0.10,
+        EncounterEntryDef(species_id="stormwing", weight=0.06,
                           min_level=4, max_level=10, base_xp=30),
-        EncounterEntryDef(species_id="chaospuff", weight=0.10,
+        EncounterEntryDef(species_id="chaospuff", weight=0.06,
                           min_level=5, max_level=12, base_xp=35),
+        # Expanded rookies
+        EncounterEntryDef(species_id="cinderpup", weight=0.06,
+                          min_level=2, max_level=7, base_xp=25),
+        EncounterEntryDef(species_id="mistpup", weight=0.06,
+                          min_level=2, max_level=7, base_xp=25),
+        EncounterEntryDef(species_id="barksprout", weight=0.06,
+                          min_level=3, max_level=8, base_xp=25),
+        EncounterEntryDef(species_id="boltrat", weight=0.05,
+                          min_level=4, max_level=10, base_xp=30),
+        EncounterEntryDef(species_id="duskling", weight=0.05,
+                          min_level=5, max_level=12, base_xp=35),
+        EncounterEntryDef(species_id="boulderpebble", weight=0.06,
+                          min_level=3, max_level=9, base_xp=25),
+        EncounterEntryDef(species_id="flaretad", weight=0.04,
+                          min_level=3, max_level=8, base_xp=25),
+        EncounterEntryDef(species_id="tideflip", weight=0.04,
+                          min_level=3, max_level=8, base_xp=25),
+        EncounterEntryDef(species_id="shadepuff", weight=0.04,
+                          min_level=5, max_level=12, base_xp=35),
+        EncounterEntryDef(species_id="sandtad", weight=0.03,
+                          min_level=4, max_level=10, base_xp=30),
+        EncounterEntryDef(species_id="arctad", weight=0.03,
+                          min_level=4, max_level=10, base_xp=30),
     ),
     encounter_rates={
         "low_grass": 0.15,
@@ -845,7 +924,7 @@ ZoneDef(
         "water_edge": 0.12,
     },
     gold_min=8, gold_max=20,
-    boss_species_id="verdant_titan",
+    boss_species_id="verdanttitan",
     boss_level=14,
     boss_gold_reward=200,
     boss_xp_reward=500,
@@ -858,20 +937,18 @@ ZoneDef(
     theme="mountain_lightning",
     min_level=15, max_level=28,
     encounter_entries=(
-        EncounterEntryDef(species_id="stormwing", weight=0.25,
-                          min_level=15, max_level=22, base_xp=45),
-        EncounterEntryDef(species_id="chaospuff", weight=0.20,
-                          min_level=16, max_level=24, base_xp=45),
-        EncounterEntryDef(species_id="rockbash", weight=0.20,
-                          min_level=17, max_level=25, base_xp=45),
-        EncounterEntryDef(species_id="pyroclaw", weight=0.10,
-                          min_level=18, max_level=26, base_xp=55),
-        EncounterEntryDef(species_id="tsunamut", weight=0.10,
-                          min_level=20, max_level=27, base_xp=55),
-        EncounterEntryDef(species_id="thornbloom", weight=0.10,
-                          min_level=20, max_level=28, base_xp=55),
-        EncounterEntryDef(species_id="voltalon", weight=0.05,
-                          min_level=20, max_level=28, base_xp=75),
+        # Original species (reduced weights)
+        EncounterEntryDef(species_id="stormwing", weight=0.08, ...),
+        EncounterEntryDef(species_id="chaospuff", weight=0.06, ...),
+        EncounterEntryDef(species_id="rockbash", weight=0.06, ...),
+        EncounterEntryDef(species_id="pyroclaw", weight=0.06, ...),
+        EncounterEntryDef(species_id="tsunamut", weight=0.05, ...),
+        EncounterEntryDef(species_id="thornbloom", weight=0.05, ...),
+        EncounterEntryDef(species_id="voltalon", weight=0.04, ...),
+        # Expanded rookies + champions
+        EncounterEntryDef(species_id="scorchimp", weight=0.05, ...),
+        EncounterEntryDef(species_id="waveminnow", weight=0.05, ...),
+        # ... (22 total entries — see systems/encounter.py for full table)
     ),
     encounter_rates={
         "mountain_path": 0.22,
@@ -883,6 +960,24 @@ ZoneDef(
     boss_level=28,
     boss_gold_reward=400,
     boss_xp_reward=1500,
+)
+
+# Zone 3: Ashen Wastes (new)
+ZoneDef(
+    zone_id="ashen_wastes",
+    name="Ashen Wastes",
+    theme="volcanic_ruins",
+    min_level=30, max_level=50,
+    encounter_entries=(
+        # Champions, Ultimates, and high-level Rookies
+        # 26 total entries — see systems/encounter.py for full table
+    ),
+    encounter_rates={
+        "volcanic_rock": 0.25,
+        "ash_field": 0.20,
+        "ruined_temple": 0.30,
+    },
+    gold_min=35, gold_max=70,
 )
 ```
 

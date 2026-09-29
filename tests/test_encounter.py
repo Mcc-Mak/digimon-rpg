@@ -4,6 +4,7 @@ import random
 
 import pytest
 
+from data.digimon_data import DIGIMON_REGISTRY
 from systems.encounter import (
     ZONES,
     check_encounter,
@@ -29,6 +30,13 @@ class TestZones:
     def test_zone_has_encounter_entries(self):
         for zone_id, zone in ZONES.items():
             assert len(zone.encounter_entries) > 0, f"{zone_id} has no entries"
+
+    def test_all_encounter_species_exist_in_registry(self):
+        for zone_id, zone in ZONES.items():
+            for entry in zone.encounter_entries:
+                assert entry.species_id in DIGIMON_REGISTRY, (
+                    f"zone '{zone_id}' references unknown species '{entry.species_id}'"
+                )
 
 
 class TestRollEncounter:
