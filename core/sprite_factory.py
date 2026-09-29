@@ -516,16 +516,194 @@ def _draw_voltalon(surf, S, body, accent, glow):
     pygame.draw.circle(surf, dark, (cx + 13, S - 38), 1)
 
 
-def _draw_generic(surf, S, body, accent, glow):
-    """Fallback blob for any species without a dedicated drawer."""
+def _draw_generic_fire(surf, S, body, accent, glow):
+    """Fire-type fallback: bipedal lizard with flame tail."""
+    cx = S // 2
+    dark = _darken(body, 0.55)
+    # Tail flame.
+    _draw_flame(surf, cx + 14, S - 22, 3, accent, glow)
+    # Legs.
+    pygame.draw.rect(surf, dark, (cx - 7, S - 16, 5, 10))
+    pygame.draw.rect(surf, dark, (cx + 3, S - 16, 5, 10)
+)
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 12, S - 28, 24, 18))
+    # Belly.
+    pygame.draw.ellipse(surf, accent, (cx - 6, S - 22, 12, 8))
+    # Neck + head.
+    pygame.draw.rect(surf, body, (cx - 3, S - 34, 6, 8))
+    pygame.draw.circle(surf, body, (cx, S - 38), 9)
+    # Snout.
+    pygame.draw.ellipse(surf, body, (cx + 4, S - 40, 8, 6))
+    # Ears (flame-like).
+    pygame.draw.polygon(surf, accent, [(cx - 5, S - 46), (cx - 8, S - 52), (cx - 2, S - 47)])
+    pygame.draw.polygon(surf, accent, [(cx + 5, S - 46), (cx + 8, S - 52), (cx + 2, S - 47)])
+    _draw_eyes(surf, cx, S - 40, 3, 2)
+    # Mouth.
+    pygame.draw.line(surf, dark, (cx + 5, S - 36), (cx + 10, S - 36), 1)
+
+
+def _draw_generic_water(surf, S, body, accent, glow):
+    """Water-type fallback: fish with fins and tail."""
+    cx = S // 2
+    dark = _darken(body, 0.55)
+    # Tail fin.
+    pygame.draw.polygon(surf, accent, [(cx - 16, S - 22), (cx - 26, S - 30), (cx - 26, S - 14)])
+    # Body (teardrop shape).
+    pygame.draw.ellipse(surf, body, (cx - 14, S - 30, 28, 18))
+    # Belly.
+    pygame.draw.ellipse(surf, accent, (cx - 8, S - 22, 16, 8))
+    # Dorsal fin.
+    pygame.draw.polygon(surf, dark, [(cx - 4, S - 30), (cx + 2, S - 38), (cx + 6, S - 30)])
+    # Side fin.
+    pygame.draw.ellipse(surf, dark, (cx - 2, S - 18, 10, 5))
+    # Head.
+    pygame.draw.circle(surf, body, (cx + 12, S - 24), 9)
+    # Snout.
+    pygame.draw.ellipse(surf, body, (cx + 16, S - 26, 8, 6))
+    # Eye.
+    _draw_eyes(surf, cx + 12, S - 26, 3, 2)
+    # Bubbles.
+    pygame.draw.circle(surf, accent, (cx + 22, S - 36), 3, 1)
+    pygame.draw.circle(surf, accent, (cx + 26, S - 42), 2, 1)
+
+
+def _draw_generic_nature(surf, S, body, accent, glow):
+    """Nature-type fallback: quadruped with leaf adornments."""
+    cx = S // 2
+    dark = _darken(body, 0.55)
+    # Legs.
+    for lx in (cx - 12, cx - 2, cx + 6, cx + 14):
+        pygame.draw.rect(surf, dark, (lx, S - 18, 5, 12))
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 16, S - 30, 32, 18))
+    # Belly.
+    pygame.draw.ellipse(surf, accent, (cx - 10, S - 22, 20, 8))
+    # Leaf on back.
+    pygame.draw.polygon(surf, dark, [(cx - 6, S - 30), (cx, S - 40), (cx + 6, S - 30)])
+    pygame.draw.line(surf, accent, (cx, S - 30), (cx, S - 38), 1)
+    # Head.
+    pygame.draw.circle(surf, body, (cx + 16, S - 30), 9)
+    # Snout.
+    pygame.draw.ellipse(surf, body, (cx + 20, S - 32, 8, 6))
+    # Ears (leaf-shaped).
+    pygame.draw.polygon(surf, dark, [(cx + 12, S - 38), (cx + 10, S - 44), (cx + 16, S - 39)])
+    pygame.draw.polygon(surf, dark, [(cx + 20, S - 38), (cx + 22, S - 44), (cx + 16, S - 39)])
+    _draw_eyes(surf, cx + 16, S - 32, 3, 2)
+    # Nostril.
+    pygame.draw.circle(surf, dark, (cx + 24, S - 31), 1)
+
+
+def _draw_generic_electric(surf, S, body, accent, glow):
+    """Electric-type fallback: mouse-like creature with spark cheeks."""
+    cx = S // 2
+    dark = _darken(body, 0.5)
+    # Tail with lightning bolt tip.
+    pygame.draw.lines(surf, dark, False, [(cx - 10, S - 22), (cx - 18, S - 16), (cx - 22, S - 10)], 2)
+    _draw_lightning(surf, cx - 22, S - 10, 3, glow)
+    # Legs.
+    pygame.draw.rect(surf, dark, (cx - 6, S - 14, 4, 8))
+    pygame.draw.rect(surf, dark, (cx + 2, S - 14, 4, 8)
+)
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 10, S - 26, 20, 16))
+    # Belly.
+    pygame.draw.ellipse(surf, accent, (cx - 6, S - 20, 12, 8))
+    # Ears (pointed).
+    pygame.draw.polygon(surf, body, [(cx - 6, S - 34), (cx - 10, S - 44), (cx - 2, S - 36)])
+    pygame.draw.polygon(surf, body, [(cx + 6, S - 34), (cx + 10, S - 44), (cx + 2, S - 36)])
+    pygame.draw.polygon(surf, dark, [(cx - 6, S - 34), (cx - 8, S - 40), (cx - 4, S - 36)])
+    pygame.draw.polygon(surf, dark, [(cx + 6, S - 34), (cx + 8, S - 40), (cx + 4, S - 36)])
+    # Head.
+    pygame.draw.circle(surf, body, (cx, S - 30), 9)
+    # Cheek sparks.
+    pygame.draw.circle(surf, glow, (cx - 7, S - 28), 3)
+    pygame.draw.circle(surf, glow, (cx + 7, S - 28), 3)
+    _draw_eyes(surf, cx, S - 32, 3, 2)
+    # Nose.
+    pygame.draw.circle(surf, dark, (cx, S - 26), 1)
+
+
+def _draw_generic_earth(surf, S, body, accent, glow):
+    """Earth-type fallback: bulky quadruped with rocky back plates."""
+    cx = S // 2
+    dark = _darken(body, 0.5)
+    stone = (130, 120, 110)
+    # Thick legs.
+    for lx in (cx - 14, cx - 2, cx + 8, cx + 16):
+        pygame.draw.rect(surf, dark, (lx, S - 18, 7, 14))
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 18, S - 32, 36, 20))
+    # Belly.
+    pygame.draw.ellipse(surf, accent, (cx - 12, S - 22, 24, 8))
+    # Rocky back plates.
+    for i, px in enumerate((cx - 12, cx - 4, cx + 4, cx + 12)):
+        r = 6 - abs(i - 1)
+        pygame.draw.circle(surf, stone, (px, S - 32), max(3, r))
+        pygame.draw.circle(surf, _darken(stone, 0.7), (px, S - 32), max(3, r), 1)
+    # Head.
+    pygame.draw.circle(surf, body, (cx - 16, S - 30), 9)
+    # Snout.
+    pygame.draw.ellipse(surf, body, (cx - 24, S - 30, 10, 7))
+    _draw_eyes(surf, cx - 16, S - 32, 3, 2)
+    # Horn.
+    pygame.draw.polygon(surf, stone, [(cx - 18, S - 38), (cx - 16, S - 44), (cx - 14, S - 38)])
+    # Nostril.
+    pygame.draw.circle(surf, dark, (cx - 20, S - 29), 1)
+
+
+def _draw_generic_dark(surf, S, body, accent, glow):
+    """Dark-type fallback: shadowy creature with wispy tendrils."""
+    cx = S // 2
+    dark = _darken(body, 0.4)
+    # Wispy aura.
+    _soft_disc(surf, (cx, S - 24), 22, accent, alpha=40)
+    # Tendrils below.
+    for tx in (cx - 10, cx - 3, cx + 4, cx + 10):
+        pygame.draw.lines(surf, dark, False,
+                          [(tx, S - 14), (tx - 3, S - 8), (tx + 2, S - 4)], 2)
+    # Body (irregular blob — not a perfect circle).
+    for ox, oy, r in ((-7, 0, 9), (7, 0, 9), (0, -5, 10), (-3, 6, 8), (4, 6, 8)):
+        pygame.draw.circle(surf, body, (cx + ox, S - 24 + oy), r)
+    # Head.
+    pygame.draw.circle(surf, body, (cx, S - 34), 9)
+    # Pointed ears.
+    pygame.draw.polygon(surf, dark, [(cx - 6, S - 40), (cx - 10, S - 48), (cx - 2, S - 42)])
+    pygame.draw.polygon(surf, dark, [(cx + 6, S - 40), (cx + 10, S - 48), (cx + 2, S - 42)])
+    # Glowing eyes (no pupils — shadowy).
+    pygame.draw.circle(surf, glow, (cx - 4, S - 36), 3)
+    pygame.draw.circle(surf, glow, (cx + 4, S - 36), 3)
+    pygame.draw.circle(surf, (255, 255, 255), (cx - 4, S - 36), 1)
+    pygame.draw.circle(surf, (255, 255, 255), (cx + 4, S - 36), 1)
+
+
+def _draw_generic_normal(surf, S, body, accent, glow):
+    """Normal-type fallback: small furry mammal."""
     cx = S // 2
     dark = _darken(body, 0.6)
-    _soft_disc(surf, (cx, S - 22), 20, glow, alpha=50)
-    pygame.draw.rect(surf, dark, (cx - 8, S - 14, 5, 10))
-    pygame.draw.rect(surf, dark, (cx + 3, S - 14, 5, 10))
-    pygame.draw.ellipse(surf, body, (cx - 14, S - 30, 28, 20))
-    pygame.draw.circle(surf, body, (cx, S - 36), 11)
+    # Legs.
+    pygame.draw.rect(surf, dark, (cx - 8, S - 16, 5, 10))
+    pygame.draw.rect(surf, dark, (cx + 3, S - 16, 5, 10)
+)
+    # Tail.
+    pygame.draw.ellipse(surf, accent, (cx + 12, S - 22, 12, 6))
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 12, S - 28, 24, 18))
+    # Belly.
+    pygame.draw.ellipse(surf, accent, (cx - 6, S - 22, 12, 8))
+    # Head.
+    pygame.draw.circle(surf, body, (cx, S - 36), 10)
+    # Round ears.
+    pygame.draw.circle(surf, body, (cx - 9, S - 42), 5)
+    pygame.draw.circle(surf, body, (cx + 9, S - 42), 5)
+    pygame.draw.circle(surf, dark, (cx - 9, S - 42), 2)
+    pygame.draw.circle(surf, dark, (cx + 9, S - 42), 2)
     _draw_eyes(surf, cx, S - 38, 4, 3)
+    # Nose.
+    pygame.draw.circle(surf, dark, (cx, S - 32), 2)
+    # Whiskers.
+    pygame.draw.line(surf, dark, (cx - 4, S - 32), (cx - 12, S - 31), 1)
+    pygame.draw.line(surf, dark, (cx + 4, S - 32), (cx + 12, S - 31), 1)
 
 
 #: Species registry key (lowercase) -> dedicated draw function.
@@ -542,6 +720,17 @@ _DRAWERS: Dict[str, _DrawFn] = {
     "chaospuff": _draw_chaospuff,
     "thornbloom": _draw_thornbloom,
     "voltalon": _draw_voltalon,
+}
+
+#: Element -> fallback draw function for species without a dedicated drawer.
+_ELEMENT_DRAWERS: Dict[str, _DrawFn] = {
+    "fire": _draw_generic_fire,
+    "water": _draw_generic_water,
+    "nature": _draw_generic_nature,
+    "electric": _draw_generic_electric,
+    "earth": _draw_generic_earth,
+    "dark": _draw_generic_dark,
+    "normal": _draw_generic_normal,
 }
 
 
@@ -581,14 +770,19 @@ def _load_png_sprite(species: Digimon) -> pygame.Surface | None:
     if stage_num is None:
         return None
     path = os.path.join(_SPRITE_DIR, f"{species.key}_{stage_num}.png")
+    if not os.path.exists(path):
+        print(f"[sprite] PNG not found: {path}  (cwd={os.getcwd()})", flush=True)
+        return None
     try:
         surf = pygame.image.load(path)
-    except Exception:
+    except Exception as exc:
+        print(f"[sprite] PNG load failed: {path} -> {exc}", flush=True)
         return None
     try:
         surf = surf.convert_alpha()
     except Exception:
         pass
+    print(f"[sprite] PNG loaded OK: {path} {surf.get_size()}", flush=True)
     return surf
 
 
@@ -604,7 +798,9 @@ def _build_sprite(species: Digimon) -> pygame.Surface:
     S = _size_for(species.stage)
     body, accent, glow = _palette_for(species.element)
     surf = pygame.Surface((S, S), pygame.SRCALPHA)
-    drawer = _DRAWERS.get(species.key, _draw_generic)
+    drawer = _DRAWERS.get(species.key)
+    if drawer is None:
+        drawer = _ELEMENT_DRAWERS.get(species.element, _draw_generic_normal)
     drawer(surf, S, body, accent, glow)
     return surf
 
@@ -632,7 +828,7 @@ def get_sprite(name: str) -> pygame.Surface:
         S = _DEFAULT_SIZE
         body, accent, glow = _ELEMENT_PALETTE["normal"]
         surf = pygame.Surface((S, S), pygame.SRCALPHA)
-        _draw_generic(surf, S, body, accent, glow)
+        _draw_generic_normal(surf, S, body, accent, glow)
     else:
         surf = _build_sprite(species)
 
