@@ -3,6 +3,22 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.17.0 - 2026-09-29
+
+### Fixed
+
+- `core/sprite_factory.py` — **Root cause of sprite loading failure found
+  and fixed.** `pygame.image.load()` cannot decode PNGs when the pygame
+  build lacks SDL_image (`get_extended() == False`), raising "File is not
+  a Windows BMP file". Added a pure-Python PNG decoder (`_decode_png()`)
+  that uses only `zlib` + `struct` (both stdlib, both WASM-safe) as a
+  fallback. The decoder handles 8-bit RGBA (color type 6) and 8-bit RGB
+  (color type 2) with all five PNG filter types (None, Sub, Up, Average,
+  Paeth). This eliminates the magenta placeholder issue on both desktop
+  pygame (no SDL_image) and pygbag/WASM.
+- `main.py` — Removed diagnostic overlay and `js.alert` debugging code
+  added in 0.16.0. The game loop is now clean.
+
 ## 0.16.0 - 2026-09-29
 
 ### Changed
