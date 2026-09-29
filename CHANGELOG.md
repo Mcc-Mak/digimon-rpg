@@ -3,6 +3,71 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.9.0 - 2026-09-29
+
+### Added
+
+- `data/digimon_data.py` — Roster expanded from 12 to 140 species:
+  - 128 new species generated at import time from
+    `_EXPANDED_SPECIES_TABLE` — a compact tuple list of
+    `(species_id, stage_num, element, evolution_target)`. The
+    `_make_expanded_species()` function produces `Digimon` instances
+    using element/stage-templated stat blocks (`_STAT_TEMPLATES`),
+    per-element growth rates (`_GROWTH_RATES`), shared element move
+    lists (`_ELEMENT_MOVES`), and element-themed descriptions
+    (`_ELEMENT_DESCRIPTIONS`).
+  - 45 evolution lines across 6 elements (fire, water, nature,
+    electric, earth, dark). Each line has Rookie → Champion →
+    Ultimate stages, each stage a separate species.
+  - Evolution requirements: Rookie → Champion (level 10, 5 battles
+    won); Champion → Ultimate (level 25, 15 battles won, 1 boss
+    defeat).
+  - Element distribution: fire=25, water=17, nature=13, electric=25,
+    earth=33, dark=27. Stage distribution: Rookie=49, Champion=46,
+    Ultimate=45.
+
+- `systems/encounter.py` — Encounter tables expanded:
+  - Zone 1 (Verdant Plains): 6 → 17 entries with expanded rookies.
+  - Zone 2 (Storm Peaks): 7 → 22 entries with expanded rookies and
+    champions.
+  - Zone 3 (Ashen Wastes): new zone, levels 30–50, 26 entries with
+    champions, ultimates, and high-level rookies.
+
+- `assets/sprites/creatures/` — 140 PNG sprite files organized by
+  species ID and stage number (`{species_id}_{stage}.png`). Runtime
+  sprites remain procedural via `core/sprite_factory.py`; PNGs are
+  for asset management only (pygbag/WASM cannot load extended image
+  formats).
+
+### Changed
+
+- `data/digimon_data.py` — Updated 6 existing species with evolution
+  targets: Stormwing → Voltalon, Voltalon → Thundergod, Rockbash →
+  Mountainhide, Seedkit → Thornbloom, Thornbloom → VerdantTitan,
+  Chaospuff → Wraithwing. `DIGIMON_REGISTRY` now includes all 140
+  species (12 hand-crafted + 128 generated).
+
+- `tests/test_sprites.py` — Replaced
+  `test_all_species_have_dedicated_drawer` with
+  `test_all_species_render_non_blank_sprite` to cover all 140
+  species (12 dedicated drawers + 128 element-tinted generic
+  fallbacks).
+
+- `tests/test_encounter.py` — Added
+  `test_all_encounter_species_exist_in_registry` to validate every
+  encounter entry resolves in the 140-species registry.
+
+- `doc/Schema.md` — Updated to v0.4.0: documents the two-tier roster
+  (12 hand-crafted + 128 templated), element/stage distribution
+  table, template approach, and 3 encounter zones (added Ashen
+  Wastes).
+
+### Verification
+
+- All sprite tests pass (12 tests in `tests/test_sprites.py`).
+- All encounter tests pass (15 tests in `tests/test_encounter.py`).
+- 140 species verified in registry; 0 evolution target errors.
+
 ## 0.8.0 - 2026-09-28
 
 ### Added
