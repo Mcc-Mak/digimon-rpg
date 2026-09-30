@@ -162,12 +162,18 @@ def _load_transparent(path: str) -> pygame.Surface:
     ``pygame.display`` has not been initialised. Skipping it in that case
     keeps the loader usable from tests and from headless bake tooling.
 
-    When ``pygame.image.load`` fails (e.g. pygame built without SDL_image),
-    a pure-Python ``zlib``+``struct`` decoder is used as fallback so the
-    code works on minimal pygame builds and under pygbag/WASM alike.
+    When SDL_image is available (``pygame.image.get_extended()`` returns
+    True — the normal case in pygbag/WASM), ``pygame.image.load`` is used
+    directly. Any exception propagates to the caller so the procedural
+    fallback in ``sprite_factory`` can draw a substitute.
+
+    On desktop builds without SDL_image, a pure-Python ``zlib``+``struct``
+    decoder is used instead. This decoder is far too slow for WASM
+    (pixel-by-pixel Python loops freeze the browser), so it is gated on
+    ``get_extended() == False`` and never runs in the deployed build.
     """
-    # Strategy 1: pygame's built-in loader (needs SDL_image for PNG).
-    try:
+    if pygame.image.get_extended():
+        # SDL_image is available — pygame.image.load handles PNGs.
         surface = pygame.image.load(path)
         if surface.get_flags() & pygame.SRCALPHA:
             return surface
@@ -175,10 +181,9 @@ def _load_transparent(path: str) -> pygame.Surface:
             surface.set_alpha(None)
             return surface
         return surface.convert_alpha()
-    except Exception:
-        pass
 
-    # Strategy 2: pure-Python PNG decoder (no SDL_image needed).
+    # Desktop fallback: pure-Python PNG decoder (no SDL_image needed).
+    # Never runs in WASM — get_extended() is True there.
     with open(path, "rb") as f:
         data = f.read()
     return _decode_png(data)
@@ -244,6 +249,8 @@ class AssetLoader:
         try:
             surface = _load_transparent(path)
         except Exception:
+            # A corrupt or unsupported file, or a missing SDL_image build,
+            # should degrade to the procedural fallback, not crash the scene.
             cls._missing.add(key)
             return None
 

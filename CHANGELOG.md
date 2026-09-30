@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.19.1 - 2026-09-30
+
+### Fixed
+
+- `core/assets.py` — `_load_transparent()` no longer falls through to
+  the pure-Python `_decode_png` decoder when `pygame.image.load` raises
+  in WASM. The previous `try/except Exception: pass` swallowed errors
+  from `pygame.image.load` and then ran the pixel-by-pixel Python
+  decoder, which froze the browser. Now the decoder is gated on
+  `get_extended() == False` (desktop-only); in WASM, where
+  `get_extended()` is True, `pygame.image.load` is called directly and
+  any exception propagates to `AssetLoader.sprite`, which returns None
+  and lets `sprite_factory` draw the procedural fallback instead.
+
 ## 0.19.0 - 2026-09-30
 
 ### Added
