@@ -3,6 +3,21 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.20.0 - 2026-09-30
+
+### Fixed
+
+- `scenes/world.py`, `scenes/battle.py` — Integrated sprite-based
+  rendering via `Animator` into the *active* scene modules. Previously
+  the sprite pipeline (`sprite_factory` → `AssetLoader` → `Animator`)
+  was wired only into the unused `world_scene.py` / `battle_scene.py`
+  files, while the scenes actually imported by the game (`world.py` and
+  `battle.py`) drew everything as plain circles. The player avatar in
+  the overworld and both combatants in battle now use animated sprites
+  with idle/walk/attack states, drop shadows, and facing-direction
+  flips. Diagnostic `browser_log` calls are retained in the asset and
+  sprite modules to trace WASM loading.
+
 ## 0.19.1 - 2026-09-30
 
 ### Fixed

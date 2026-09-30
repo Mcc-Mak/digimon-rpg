@@ -19,6 +19,8 @@ import pygame
 
 import config
 from core.scene import Scene
+from core.animator import Animator, AnimationState
+from core.wasm_log import browser_log
 from systems.encounter import check_encounter, ZONES
 
 # ---------------------------------------------------------------------------
@@ -116,6 +118,15 @@ class WorldScene(Scene):
         self._font_lg = pygame.font.Font(None, 36)
         self._font_md = pygame.font.Font(None, 24)
         self._font_sm = pygame.font.Font(None, 18)
+        self._facing: str = "right"
+
+        save = getattr(game, "save_data", None)
+        if save is not None and save.party:
+            species = save.party[0].species_id
+        else:
+            species = getattr(game, "_player_species", "emberling")
+        browser_log(f"[world] creating Animator for species={species}")
+        self._player_anim = Animator(species, facing="right")
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -214,6 +225,15 @@ class WorldScene(Scene):
         # Save position for battle return.
         self.game.player_world_pos = (self._player_x, self._player_y)
 
+        # Update facing and walk animation.
+        if dx < 0:
+            self._facing = "left"
+            self._player_anim.set_facing("left")
+        elif dx > 0:
+            self._facing = "right"
+            self._player_anim.set_facing("right")
+        self._player_anim.play(AnimationState.WALK)
+
         # Encounter check
         if self._encounter_cooldown > 0:
             return
@@ -253,8 +273,11 @@ class WorldScene(Scene):
     def update(self, dt: float) -> None:
         if self._move_cooldown > 0:
             self._move_cooldown -= dt
+            if self._move_cooldown <= 0:
+                self._player_anim.play(AnimationState.IDLE)
         if self._encounter_cooldown > 0:
             self._encounter_cooldown -= dt
+        self._player_anim.update(dt)
 
     # ------------------------------------------------------------------
     # Rendering
@@ -309,11 +332,22 @@ class WorldScene(Scene):
             pygame.draw.rect(screen, config.DARK_GRAY, rect)
 
     def _draw_player(self, screen: pygame.Surface) -> None:
-        cx = self._player_x * _TILE_SIZE + _TILE_SIZE // 2
-        cy = self._player_y * _TILE_SIZE + _TILE_SIZE // 2
-        pygame.draw.circle(screen, config.WHITE, (cx, cy), 13)
-        pygame.draw.circle(screen, config.RED, (cx, cy), 11)
-        pygame.draw.circle(screen, config.WHITE, (cx, cy), 11, 2)
+        frame = self._player_anim.current_frame
+        # Scale the animation frame to fit a ~30px-wide box, preserving
+        # aspect ratio so the creature is not stretched.
+        target_w = 30
+        scale = target_w / max(1, frame.get_width())
+        target_h = max(1, int(frame.get_height() * scale))
+        sprite = pygame.transform.scale(frame, (target_w, target_h))
+
+        px = self._player_x * _TILE_SIZE + _TILE_SIZE // 2
+        py = self._player_y * _TILE_SIZE + _TILE_SIZE - 2
+        # Soft drop shadow under the avatar.
+        shadow = pygame.Surface((24, 8), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow, (0, 0, 0, 110), (0, 0, 24, 8))
+        screen.blit(shadow, (px - 12, py - 4))
+        rect = sprite.get_rect(midbottom=(px, py))
+        screen.blit(sprite, rect)
 
     def _draw_hud(self, screen: pygame.Surface) -> None:
         zone_name = ZONES.get(_ZONE_ID)

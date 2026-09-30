@@ -36,6 +36,8 @@ from typing import Dict, Iterable, List, Optional
 
 import pygame
 
+from core.wasm_log import browser_log
+
 #: Directory names searched for under the project root.
 SPRITE_DIR: str = os.path.join("assets", "sprites", "creatures")
 
@@ -49,12 +51,17 @@ def _candidate_roots() -> Iterable[str]:
     """
     module_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(module_dir)
+    browser_log(f"[assets] __file__={os.path.abspath(__file__)}")
+    browser_log(f"[assets] module_dir={module_dir}")
+    browser_log(f"[assets] project_root={project_root}")
+    browser_log(f"[assets] cwd={os.path.abspath(os.getcwd())}")
     # In the pygbag bundle the app is unpacked under a hashed build dir, so
     # also consider the cwd the browser serves from.
     seen: List[str] = []
     for root in (project_root, os.path.abspath(os.getcwd())):
         if root not in seen:
             seen.append(root)
+            browser_log(f"[assets] candidate root: {root}")
             yield root
 
 
@@ -174,7 +181,9 @@ def _load_transparent(path: str) -> pygame.Surface:
     """
     if pygame.image.get_extended():
         # SDL_image is available — pygame.image.load handles PNGs.
+        browser_log(f"[assets] get_extended=True, using pygame.image.load")
         surface = pygame.image.load(path)
+        browser_log(f"[assets] loaded: {path} size={surface.get_size()}")
         if surface.get_flags() & pygame.SRCALPHA:
             return surface
         if not pygame.display.get_init():
@@ -184,6 +193,7 @@ def _load_transparent(path: str) -> pygame.Surface:
 
     # Desktop fallback: pure-Python PNG decoder (no SDL_image needed).
     # Never runs in WASM — get_extended() is True there.
+    browser_log(f"[assets] get_extended=False, using pure-Python decoder")
     with open(path, "rb") as f:
         data = f.read()
     return _decode_png(data)
@@ -215,8 +225,11 @@ class AssetLoader:
         relative = relative.replace("\\", "/").lstrip("/")
         for root in _candidate_roots():
             candidate = os.path.join(root, *relative.split("/"))
-            if os.path.isfile(candidate):
+            exists = os.path.isfile(candidate)
+            browser_log(f"[assets] resolve: {candidate} exists={exists}")
+            if exists:
                 return candidate
+        browser_log(f"[assets] resolve: NOT FOUND for {relative}")
         return None
 
     @classmethod
@@ -235,22 +248,27 @@ class AssetLoader:
         key = name.strip().lower()
         if key.endswith(".png"):
             key = key[:-4]
+        browser_log(f"[assets] sprite requested: key={key}")
         cached = cls._sprites.get(key)
         if cached is not None:
+            browser_log(f"[assets] sprite cache hit: {key}")
             return cached
         if key in cls._missing:
+            browser_log(f"[assets] sprite known missing: {key}")
             return None
 
         path = cls.resolve(f"{SPRITE_DIR}/{key}.png")
         if path is None:
+            browser_log(f"[assets] sprite file not found: {key}")
             cls._missing.add(key)
             return None
 
         try:
+            browser_log(f"[assets] loading sprite: {key} from {path}")
             surface = _load_transparent(path)
-        except Exception:
-            # A corrupt or unsupported file, or a missing SDL_image build,
-            # should degrade to the procedural fallback, not crash the scene.
+            browser_log(f"[assets] sprite loaded OK: {key} size={surface.get_size()}")
+        except Exception as exc:
+            browser_log(f"[assets] sprite load FAILED: {key} error={exc!r}")
             cls._missing.add(key)
             return None
 

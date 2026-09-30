@@ -30,6 +30,8 @@ from typing import Dict, List, Tuple
 
 import pygame
 
+from core.wasm_log import browser_log
+
 
 class AnimationState(Enum):
     """Supported animation states."""
@@ -223,14 +225,18 @@ def get_frames(species_key: str, facing: str = "right",
     if cached is not None:
         return cached
 
+    browser_log(f"[animator] get_frames: species={species_key} facing={facing} state={state.value}")
+
     # Import here to avoid circular import at module load time.
     from core.sprite_factory import get_battle_sprite
 
     base = get_battle_sprite(species_key, facing=facing)
+    browser_log(f"[animator] base sprite size={base.get_size()}, generating frames")
     generator = _GENERATORS.get(state, _gen_idle_frames)
     frames = generator(base, facing)
     if not frames:
         frames = [base.copy()]
+    browser_log(f"[animator] generated {len(frames)} frames for {species_key}")
     _FRAME_CACHE[cache_key] = frames
     return frames
 
