@@ -21,6 +21,8 @@ import pygame
 
 import config
 from core.scene import Scene
+from core.animator import Animator, AnimationState
+from core.wasm_log import browser_log
 from data.digimon_data import Digimon, Move, get_digimon
 from systems.battle import BattleDigimon, BattleEngine
 from systems.encounter import roll_gold
@@ -157,6 +159,10 @@ class BattleScene(Scene):
         self._new_species_def: Optional[Digimon] = None
         self._evolution_message: str = ""
 
+        # Sprite animators (initialised in enter())
+        self._player_anim: Optional[Animator] = None
+        self._enemy_anim: Optional[Animator] = None
+
         # Pre-render flash overlay
         self._flash_surf = pygame.Surface(config.SCREEN_SIZE, pygame.SRCALPHA)
 
@@ -197,6 +203,10 @@ class BattleScene(Scene):
         self._enemy_species_name = encounter["species"]
         enemy_disp = get_digimon(encounter["species"])
         self._intro_text = f"A wild {enemy_disp.name} appeared!"
+
+        browser_log(f"[battle] init animators: player={party_member.species_id} enemy={encounter['species']}")
+        self._player_anim = Animator(party_member.species_id, facing="right")
+        self._enemy_anim = Animator(encounter["species"], facing="left")
 
         self._phase = PHASE_INTRO
         self._phase_duration = _INTRO_DURATION
@@ -428,6 +438,24 @@ class BattleScene(Scene):
                 self._anim_flash_done = True
                 self._flash_alpha = 180
 
+        # Advance sprite animators
+        if self._player_anim is not None:
+            self._player_anim.update(dt)
+        if self._enemy_anim is not None:
+            self._enemy_anim.update(dt)
+
+        # Trigger attack animation on the acting side
+        if self._phase == PHASE_PLAYER_ANIM and self._player_anim is not None:
+            if self._player_anim.state != AnimationState.ATTACK:
+                self._player_anim.play(AnimationState.ATTACK)
+        elif self._phase == PHASE_ENEMY_ANIM and self._enemy_anim is not None:
+            if self._enemy_anim.state != AnimationState.ATTACK:
+                self._enemy_anim.play(AnimationState.ATTACK)
+        elif self._player_anim is not None and self._player_anim.state == AnimationState.ATTACK:
+            self._player_anim.play(AnimationState.IDLE)
+        elif self._enemy_anim is not None and self._enemy_anim.state == AnimationState.ATTACK:
+            self._enemy_anim.play(AnimationState.IDLE)
+
         if self._phase == PHASE_INTRO and self._phase_timer <= 0:
             self._start_round()
         elif self._phase == PHASE_PLAYER_ANIM and self._phase_timer <= 0:
@@ -490,44 +518,35 @@ class BattleScene(Scene):
         prog = self._get_anim_progress()
         fwd = _fwd_factor(prog)
 
-        # Player
+        # Player sprite
         p_off_x = 0
         p_off_y = 0
         if self._phase == PHASE_PLAYER_ANIM:
-            p_off_x = int(fwd * 120)
-            p_off_y = int(-fwd * 60)
+            p_off_x = int(fwd * 60)
+            p_off_y = int(-fwd * 30)
 
-        # Determine player display species/element/stage
         if self._phase == PHASE_EVOLUTION and self._new_species_def is not None:
-            p_color = _element_color(self._new_species_def.element)
-            p_radius = _stage_radius(self._new_species_def.stage)
+            p_species_def = self._new_species_def
         else:
-            p_species = get_digimon(engine.player.species_name)
-            p_color = _element_color(p_species.element)
-            p_radius = _stage_radius(p_species.stage)
-
-        self._draw_digimon_shape(
-            screen,
-            _PLAYER_BASE[0] + p_off_x,
-            _PLAYER_BASE[1] + p_off_y,
-            p_color,
+            p_species_def = get_digimon(engine.player.species_name)
+        p_radius = _stage_radius(p_species_def.stage)
+        self._draw_digimon_sprite(
+            screen, self._player_anim,
+            _PLAYER_BASE[0] + p_off_x, _PLAYER_BASE[1] + p_off_y,
             p_radius,
         )
 
-        # Enemy
+        # Enemy sprite
         e_off_x = 0
         e_off_y = 0
         if self._phase == PHASE_ENEMY_ANIM:
-            e_off_x = int(-fwd * 120)
-            e_off_y = int(fwd * 60)
+            e_off_x = int(-fwd * 60)
+            e_off_y = int(fwd * 30)
         e_species = get_digimon(engine.enemy.species_name)
-        e_color = _element_color(e_species.element)
         e_radius = _stage_radius(e_species.stage)
-        self._draw_digimon_shape(
-            screen,
-            _ENEMY_BASE[0] + e_off_x,
-            _ENEMY_BASE[1] + e_off_y,
-            e_color,
+        self._draw_digimon_sprite(
+            screen, self._enemy_anim,
+            _ENEMY_BASE[0] + e_off_x, _ENEMY_BASE[1] + e_off_y,
             e_radius,
         )
 
@@ -547,19 +566,27 @@ class BattleScene(Scene):
             None, None,
         )
 
-    def _draw_digimon_shape(
-        self, screen: pygame.Surface, cx: int, cy: int,
-        color: Tuple[int, int, int], radius: int,
+    def _draw_digimon_sprite(
+        self, screen: pygame.Surface, anim: Optional[Animator],
+        cx: int, cy: int, radius: int,
     ) -> None:
-        pygame.draw.circle(screen, color, (cx, cy), radius)
-        pygame.draw.circle(screen, config.WHITE, (cx, cy), radius, 2)
-        # Eyes
-        eye_dx = max(5, radius // 3)
-        eye_r = max(3, radius // 6)
-        pygame.draw.circle(screen, config.WHITE, (cx - eye_dx, cy - eye_dx), eye_r)
-        pygame.draw.circle(screen, config.WHITE, (cx + eye_dx, cy - eye_dx), eye_r)
-        pygame.draw.circle(screen, config.BLACK, (cx - eye_dx, cy - eye_dx), max(1, eye_r // 2))
-        pygame.draw.circle(screen, config.BLACK, (cx + eye_dx, cy - eye_dx), max(1, eye_r // 2))
+        """Draw a digimon sprite centred at (cx, cy), scaled to ~2×radius."""
+        if anim is None:
+            return
+        frame = anim.current_frame
+        # Scale to roughly match the old circle diameter.
+        target = radius * 2
+        fw, fh = frame.get_size()
+        scale = target / max(fw, fh)
+        sw = max(1, int(fw * scale))
+        sh = max(1, int(fh * scale))
+        sprite = pygame.transform.scale(frame, (sw, sh))
+        # Soft shadow
+        shadow = pygame.Surface((target, 10), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow, (0, 0, 0, 100), (0, 0, target, 10))
+        screen.blit(shadow, (cx - target // 2, cy + radius - 4))
+        rect = sprite.get_rect(center=(cx, cy))
+        screen.blit(sprite, rect)
 
     def _draw_info_box(
         self, screen: pygame.Surface, x: int, y: int, w: int, h: int,
