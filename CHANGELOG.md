@@ -3,6 +3,52 @@
 All notable changes to this project are documented in this file.
 Entries follow [Semantic Versioning](https://semver.org/) in the form `X.X.X`.
 
+## 0.19.0 - 2026-09-30
+
+### Added
+
+- `core/assets.py` — New `AssetLoader` class with `__file__`-based path
+  resolution (`_candidate_roots()`), replacing the fragile CWD-relative
+  path logic that broke in the WASM/pygbag bundle. Resolves sprites
+  relative to the module file, not the process working directory, so
+  paths work identically on desktop and in-browser.
+  Includes `_decode_png()` pure-Python PNG decoder as fallback when
+  pygame lacks SDL_image (`get_extended() == False`), and a
+  `_load_transparent()` dual-strategy loader (pygame.image.load →
+  fallback to `_decode_png`).
+- `pygbag.ini` — Build configuration that excludes `/doc`, `/tests`,
+  `/tools`, `/__pycache__`, `/.venv`, `/build`, and the local
+  `/digimon-rpg-svc4` reference directory from the WASM bundle. Prevents
+  bloat and keeps local-only franchise art out of the public Pages site.
+- `tests/test_assets.py` — New test suite covering path resolution,
+  sprite loading, cache behavior, sprite-key uniqueness, and procedural
+  fallback integration.
+
+### Changed
+
+- `core/sprite_factory.py` — Fully rewritten to use
+  `AssetLoader.sprite(species.sprite_key)` with procedural draw fallback
+  via `_draw_procedural()`. Removed all diagnostics machinery
+  (`DIAGNOSTICS`, `get_diagnostics`, `_diag`, `_STAGE_NUM`,
+  `_load_png_sprite`, `_error_placeholder`, `_init_diagnostics`,
+  `_decode_png` (moved to assets.py), `_SPRITE_PATH_CANDIDATES`).
+  Procedural fallback uses `_ELEMENT_PALETTE` (7 elements) and
+  `_STAGE_SIZE` (Rookie=56, Champion=72, Ultimate=88) canvases with 12
+  dedicated draw functions in `_DRAWERS` registry and `_draw_generic`
+  fallback for the remaining 128 species. API surface preserved:
+  `get_sprite`, `get_battle_sprite`, `get_world_sprite`, `clear_cache`.
+- `data/digimon_data.py` — Added `STAGE_NUMBER` dict
+  (`{"Rookie": 1, "Champion": 2, "Ultimate": 3}`) and `sprite_key`
+  property on `Digimon` (returns `f"{self.key}_{stage_num}"`).
+- `tests/test_sprites.py` — Rewritten to exercise the full pipeline
+  (baked PNG + procedural fallback) without monkeypatching internal
+  loaders. Added `TestProceduralFallback` class that forces AssetLoader
+  misses to verify the procedural draw path.
+- `tests/test_animator.py` — Updated monkeypatch from
+  `sprite_factory._load_png_sprite` (removed) to
+  `sprite_factory._build_sprite` (replacement). Added save/restore of
+  the original function in `teardown_module` to prevent leak.
+
 ## 0.18.0 - 2026-09-29
 
 ### Added
