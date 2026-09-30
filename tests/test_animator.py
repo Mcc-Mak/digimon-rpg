@@ -1,6 +1,6 @@
 """Tests for the frame-based animation system (core/animator.py).
 
-Tests monkeypatch ``sprite_factory._load_png_sprite`` to return synthetic
+Tests monkeypatch ``sprite_factory._build_sprite`` to return synthetic
 surfaces so they are deterministic regardless of whether SDL2_image / PNG
 support is available on the host.
 """
@@ -19,7 +19,7 @@ from core.animator import (
 )
 
 
-def _fake_png(species):
+def _fake_build(species):
     surf = pygame.Surface((50, 50), pygame.SRCALPHA)
     surf.fill((100, 150, 200))
     pygame.draw.circle(surf, (255, 0, 0), (25, 25), 15)
@@ -27,12 +27,20 @@ def _fake_png(species):
     return surf
 
 
+_original_build = None
+
+
 def setup_module(module):
+    global _original_build
     pygame.init()
-    sprite_factory._load_png_sprite = _fake_png
+    _original_build = sprite_factory._build_sprite
+    sprite_factory._build_sprite = _fake_build
 
 
 def teardown_module(module):
+    global _original_build
+    if _original_build is not None:
+        sprite_factory._build_sprite = _original_build
     pygame.quit()
 
 
