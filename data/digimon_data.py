@@ -31,6 +31,14 @@ from typing import Dict, List
 Stage = str  # "Rookie", "Champion", "Ultimate"
 Element = str  # "fire", "water", "nature", "electric", "earth", "dark", "normal"
 
+#: Evolution stage -> the 1-based number used in sprite asset keys and
+#: filenames (e.g. ``emberling_1.png`` for a Rookie).
+STAGE_NUMBER: Dict[str, int] = {
+    "Rookie": 1,
+    "Champion": 2,
+    "Ultimate": 3,
+}
+
 
 # ---------------------------------------------------------------------------
 # Move dataclass
@@ -123,6 +131,15 @@ class Digimon:
     def key(self) -> str:
         """Return the lowercase registry key for this species."""
         return self.name.lower()
+
+    @property
+    def sprite_key(self) -> str:
+        """Return the asset key used to look up this species' sprite.
+
+        Follows the ``{species_id}_{stage_number}`` convention, e.g.
+        ``"emberling_1"`` for a Rookie.
+        """
+        return f"{self.key}_{STAGE_NUMBER.get(self.stage, 1)}"
 
     def get_move(self, move_name: str) -> Move | None:
         """Look up one of this creature's moves by name (case-insensitive).

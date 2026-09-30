@@ -1,65 +1,532 @@
 """Creature sprites for digimon-rpg.
 
-Sprites are loaded exclusively from PNG files in ``assets/sprites/creatures/``.
-There is no procedural fallback — if a PNG is missing or cannot be decoded,
-a magenta error placeholder is returned so the failure is immediately visible.
+Each Digimon species resolves to a transparent ``SRCALPHA`` surface, obtained
+from the baked PNG under ``assets/sprites/creatures/`` when it is present and
+drawn on the fly with ``pygame.draw`` primitives when it is not.
 
-PNG decoding uses a pure-Python fallback (``zlib`` + ``struct``) when
-``pygame.image.load()`` fails, which happens when the pygame build lacks
-SDL_image support (``get_extended() == False``).  This keeps the code
-portable across desktop pygame and pygbag/WASM without external deps.
+The draw functions remain the source of truth for the artwork:
+``tools/bake_sprites.py`` renders them at 4x and downscales, so the shipped
+PNGs stay in sync with the code. The fallback path means a partially populated
+``assets/`` tree still produces a playable, correct-looking game.
+
+Design
+------
+
+* A species' sprite comes from its baked PNG (keyed by
+  :attr:`data.digimon_data.Digimon.sprite_key`) via :class:`core.assets.AssetLoader`.
+  If the file is missing, the draw function below is used directly.
+* Body color, accent color, and glow color are derived from the species'
+  element via :data:`_ELEMENT_PALETTE`.
+* Sprite canvas size scales with evolution stage (Rookie < Champion <
+  Ultimate) so Ultimates read as larger and more detailed.
+* A per-species draw function (registered in :data:`_DRAWERS`) paints the
+  creature. Species without a dedicated drawer fall back to a generic
+  elemental blob so rendering never crashes on an unknown name.
+* Surfaces are cached: the first call builds the sprite, later calls return
+  the cached instance. Battle sprites are cached per facing direction.
+
+WASM safety: only ``pygame.Surface`` / ``pygame.draw`` / ``pygame.transform``
+and the bundled ``pygame.image.load`` in :mod:`core.assets` are used. No
+subprocess, no threads, no writes to disk.
 """
 
 from __future__ import annotations
 
-import os
-import struct
-import zlib
-from typing import Dict, List
+from typing import Callable, Dict, Tuple
 
 import pygame
 
-from core.wasm_log import browser_log
+from core.assets import AssetLoader
 from data.digimon_data import Digimon, get_digimon
 
-# ---------------------------------------------------------------------------
-# Diagnostics buffer (drawn on-screen by main.py debug overlay)
-# ---------------------------------------------------------------------------
-
-DIAGNOSTICS: List[str] = []
-
-
-def get_diagnostics() -> List[str]:
-    """Return a copy of the accumulated diagnostic messages."""
-    return list(DIAGNOSTICS)
-
-
-def _diag(msg: str) -> None:
-    """Append a diagnostic message and also log it to the browser console."""
-    DIAGNOSTICS.append(msg)
-    print(msg, flush=True)
-    browser_log(msg)
+# A draw function takes the target surface, the canvas size S, and the
+# (body, accent, glow) color triple and paints the creature centered on it.
+_DrawFn = Callable[[pygame.Surface, int, Tuple[int, int, int], Tuple[int, int, int], Tuple[int, int, int]], None]
+_RGB = Tuple[int, int, int]
 
 
 # ---------------------------------------------------------------------------
-# Sprite loading
+# Palettes and sizing
 # ---------------------------------------------------------------------------
 
-#: Evolution stage -> numeric suffix used in PNG filenames.
-_STAGE_NUM: Dict[str, int] = {
-    "Rookie": 1,
-    "Champion": 2,
-    "Ultimate": 3,
+#: Element -> (body, accent, glow) color triples.
+_ELEMENT_PALETTE: Dict[str, Tuple[_RGB, _RGB, _RGB]] = {
+    "fire":     ((224, 80, 40),  (255, 180, 40),  (255, 230, 150)),
+    "water":    ((60, 130, 220), (150, 220, 255), (200, 240, 255)),
+    "nature":   ((80, 170, 70),  (180, 230, 120), (230, 250, 200)),
+    "electric": ((240, 210, 50), (255, 255, 170), (255, 245, 200)),
+    "earth":    ((150, 110, 70), (210, 190, 150), (120, 95, 60)),
+    "dark":     ((90, 60, 130),  (180, 120, 220), (230, 190, 255)),
+    "normal":   ((160, 160, 160),(220, 220, 220), (240, 240, 240)),
 }
 
-#: Candidate relative paths for the sprite directory.
-#: pygbag's archive mount can create different CWD layouts, so we try
-#: all of these when loading a sprite.
-_SPRITE_PATH_CANDIDATES = [
-    "assets/sprites/creatures",
-    "assets/assets/sprites/creatures",
-    "sprites/creatures",
-]
+#: Evolution stage -> canvas size in pixels.
+_STAGE_SIZE: Dict[str, int] = {
+    "Rookie": 56,
+    "Champion": 72,
+    "Ultimate": 88,
+}
+
+_DEFAULT_SIZE: int = 56
+
+
+# ---------------------------------------------------------------------------
+# Color / draw helpers
+# ---------------------------------------------------------------------------
+
+def _darken(color: _RGB, factor: float = 0.6) -> _RGB:
+    """Return a darker shade of ``color`` multiplied by ``factor``."""
+    return (
+        max(0, min(255, int(color[0] * factor))),
+        max(0, min(255, int(color[1] * factor))),
+        max(0, min(255, int(color[2] * factor))),
+    )
+
+
+def _lighten(color: _RGB, factor: float = 0.3) -> _RGB:
+    """Return a lighter shade of ``color`` mixed toward white by ``factor``."""
+    return (
+        max(0, min(255, int(color[0] + (255 - color[0]) * factor))),
+        max(0, min(255, int(color[1] + (255 - color[1]) * factor))),
+        max(0, min(255, int(color[2] + (255 - color[2]) * factor))),
+    )
+
+
+def _soft_disc(surf: pygame.Surface, center: Tuple[int, int], radius: int,
+               color: _RGB, alpha: int = 70) -> None:
+    """Blit a soft, semi-transparent disc (used for auras / glows)."""
+    if radius <= 0:
+        return
+    size = radius * 2 + 4
+    tmp = pygame.Surface((size, size), pygame.SRCALPHA)
+    pygame.draw.circle(tmp, (color[0], color[1], color[2], alpha),
+                       (radius + 2, radius + 2), radius)
+    surf.blit(tmp, (center[0] - radius - 2, center[1] - radius - 2))
+
+
+def _draw_eyes(surf: pygame.Surface, cx: int, cy: int, sep: int, r: int,
+               white: _RGB = (255, 255, 255), pupil: _RGB = (25, 25, 35)) -> None:
+    """Draw a pair of forward-facing eyes centered above (cx, cy)."""
+    r = max(1, r)
+    pygame.draw.circle(surf, white, (cx - sep, cy), r)
+    pygame.draw.circle(surf, white, (cx + sep, cy), r)
+    pr = max(1, r - 2)
+    pygame.draw.circle(surf, pupil, (cx - sep + 1, cy), pr)
+    pygame.draw.circle(surf, pupil, (cx + sep + 1, cy), pr)
+
+
+def _draw_flame(surf: pygame.Surface, x: int, y: int, scale: int,
+                color: _RGB, hot: _RGB) -> None:
+    """Draw a stylized flame at (x, y) used for fire-type tails/auras."""
+    s = scale
+    # Outer flame.
+    pygame.draw.polygon(surf, color, [
+        (x, y - 3 * s),
+        (x - s, y - s),
+        (x - 2 * s, y + s),
+        (x - s, y),
+        (x, y + 2 * s),
+        (x + s, y),
+        (x + 2 * s, y + s),
+        (x + s, y - s),
+    ])
+    # Inner hot core.
+    pygame.draw.polygon(surf, hot, [
+        (x, y - 2 * s),
+        (x - s, y),
+        (x, y + s),
+        (x + s, y),
+    ])
+
+
+def _draw_droplet(surf: pygame.Surface, x: int, y: int, r: int,
+                  color: _RGB) -> None:
+    """Draw a water droplet (circle + pointed top)."""
+    pygame.draw.circle(surf, color, (x, y), r)
+    pygame.draw.polygon(surf, color, [(x - r, y), (x, y - r * 2), (x + r, y)])
+
+
+def _draw_lightning(surf: pygame.Surface, x: int, y: int, s: int,
+                    color: _RGB) -> None:
+    """Draw a small zigzag lightning bolt."""
+    pygame.draw.lines(surf, color, False, [
+        (x, y - 2 * s),
+        (x - s, y),
+        (x + s, y),
+        (x - s, y + 2 * s),
+    ], 2)
+
+
+def _draw_thorn(surf: pygame.Surface, x: int, y: int, length: int,
+                color: _RGB, angle: int = 0) -> None:
+    """Draw a triangular thorn pointing outward from (x, y)."""
+    if angle == 0:  # pointing right
+        pts = [(x, y - 3), (x + length, y), (x, y + 3)]
+    elif angle == 180:  # pointing left
+        pts = [(x, y - 3), (x - length, y), (x, y + 3)]
+    elif angle == 90:  # pointing up
+        pts = [(x - 3, y), (x, y - length), (x + 3, y)]
+    else:  # pointing down
+        pts = [(x - 3, y), (x, y + length), (x + 3, y)]
+    pygame.draw.polygon(surf, color, pts)
+
+
+# ---------------------------------------------------------------------------
+# Per-species draw functions
+# ---------------------------------------------------------------------------
+
+def _draw_emberling(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.6)
+    # Tail flame (behind body).
+    _draw_flame(surf, cx + 16, S - 22, 4, accent, glow)
+    # Legs.
+    pygame.draw.rect(surf, dark, (cx - 8, S - 16, 5, 10))
+    pygame.draw.rect(surf, dark, (cx + 4, S - 16, 5, 10))
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 14, S - 28, 28, 18))
+    # Ember patches along the spine.
+    pygame.draw.circle(surf, accent, (cx - 6, S - 24), 3)
+    pygame.draw.circle(surf, accent, (cx + 4, S - 22), 3)
+    # Head.
+    pygame.draw.circle(surf, body, (cx - 2, S - 38), 11)
+    pygame.draw.ellipse(surf, body, (cx + 4, S - 40, 10, 8))  # snout
+    # Eyes + mouth.
+    _draw_eyes(surf, cx - 2, S - 40, 4, 3)
+    pygame.draw.line(surf, dark, (cx + 6, S - 33), (cx + 12, S - 33), 1)
+
+
+def _draw_pyroclaw(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.55)
+    # Quadruped legs.
+    for lx in (cx - 14, cx - 4, cx + 6, cx + 14):
+        pygame.draw.rect(surf, dark, (lx, S - 18, 6, 14))
+        # White-hot claws.
+        pygame.draw.polygon(surf, (255, 250, 220),
+                            [(lx, S - 4), (lx + 2, S - 1), (lx + 4, S - 4)])
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 18, S - 30, 36, 20))
+    # Molten veins (glowing cracks).
+    pygame.draw.line(surf, glow, (cx - 8, S - 24), (cx + 6, S - 18), 2)
+    pygame.draw.line(surf, glow, (cx + 2, S - 26), (cx + 12, S - 22), 2)
+    # Head.
+    pygame.draw.circle(surf, body, (cx + 16, S - 36), 11)
+    pygame.draw.ellipse(surf, body, (cx + 20, S - 38, 12, 9))  # jaw
+    # Glowing eye.
+    pygame.draw.circle(surf, glow, (cx + 18, S - 38), 3)
+    pygame.draw.circle(surf, (40, 20, 0), (cx + 19, S - 38), 1)
+    # Horns.
+    pygame.draw.polygon(surf, dark,
+                        [(cx + 12, S - 44), (cx + 10, S - 50), (cx + 15, S - 45)])
+    pygame.draw.polygon(surf, dark,
+                        [(cx + 20, S - 44), (cx + 22, S - 50), (cx + 17, S - 45)])
+
+
+def _draw_infernosaur(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.5)
+    # Flame aura.
+    _soft_disc(surf, (cx, S - 28), 30, accent, alpha=60)
+    # Wings.
+    pygame.draw.polygon(surf, dark, [
+        (cx - 14, S - 40), (cx - 34, S - 50), (cx - 30, S - 34), (cx - 10, S - 32)])
+    pygame.draw.polygon(surf, dark, [
+        (cx + 14, S - 40), (cx + 34, S - 50), (cx + 30, S - 34), (cx + 10, S - 32)])
+    # Tail with flame.
+    pygame.draw.polygon(surf, body,
+                        [(cx - 18, S - 22), (cx - 32, S - 14), (cx - 16, S - 16)])
+    _draw_flame(surf, cx - 30, S - 16, 5, accent, glow)
+    # Legs.
+    pygame.draw.rect(surf, dark, (cx - 12, S - 14, 7, 14))
+    pygame.draw.rect(surf, dark, (cx + 5, S - 14, 7, 14))
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 18, S - 34, 36, 24))
+    # Neck + head.
+    pygame.draw.polygon(surf, body,
+                        [(cx + 8, S - 32), (cx + 22, S - 48), (cx + 14, S - 30)])
+    pygame.draw.circle(surf, body, (cx + 22, S - 48), 10)
+    pygame.draw.polygon(surf, dark,
+                        [(cx + 28, S - 50), (cx + 36, S - 48), (cx + 28, S - 46)])  # snout
+    # Eye.
+    pygame.draw.circle(surf, glow, (cx + 22, S - 50), 3)
+    pygame.draw.circle(surf, (60, 20, 0), (cx + 23, S - 50), 1)
+    # Dorsal flame crest.
+    for i, fx in enumerate((cx - 8, cx, cx + 8)):
+        _draw_flame(surf, fx, S - 38, 3, accent, glow)
+
+
+def _draw_aquapup(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.6)
+    # Translucent side fins.
+    _soft_disc(surf, (cx - 16, S - 22), 10, accent, alpha=90)
+    _soft_disc(surf, (cx + 16, S - 22), 10, accent, alpha=90)
+    # Tail flipper.
+    pygame.draw.ellipse(surf, accent, (cx + 16, S - 20, 12, 8))
+    # Round body.
+    pygame.draw.circle(surf, body, (cx, S - 22), 16)
+    # Belly highlight.
+    pygame.draw.ellipse(surf, accent, (cx - 8, S - 16, 16, 10))
+    # Head (merged).
+    pygame.draw.circle(surf, body, (cx - 4, S - 34), 11)
+    # Ears.
+    pygame.draw.circle(surf, dark, (cx - 12, S - 42), 4)
+    pygame.draw.circle(surf, dark, (cx + 2, S - 42), 4)
+    # Big hopeful eyes.
+    _draw_eyes(surf, cx - 4, S - 36, 4, 4)
+    # Whiskers.
+    pygame.draw.line(surf, dark, (cx - 10, S - 30), (cx - 18, S - 30), 1)
+    pygame.draw.line(surf, dark, (cx + 2, S - 30), (cx + 10, S - 30), 1)
+    # Nose.
+    pygame.draw.circle(surf, dark, (cx - 4, S - 30), 2)
+
+
+def _draw_tsunamut(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.55)
+    # Water jets around body.
+    for dx, dy, r in ((-22, -6, 4), (20, -10, 5), (-14, 12, 3), (22, 8, 4)):
+        _draw_droplet(surf, cx + dx, S - 24 + dy, r, accent)
+    # Legs with claws.
+    for lx in (cx - 12, cx + 4):
+        pygame.draw.rect(surf, dark, (lx, S - 16, 7, 14))
+        for i in range(3):
+            pygame.draw.polygon(surf, (240, 250, 255),
+                                [(lx + i * 2, S - 2), (lx + i * 2 + 1, S + 1), (lx + i * 2 + 2, S - 2)])
+    # Elongated body.
+    pygame.draw.ellipse(surf, body, (cx - 18, S - 30, 36, 20))
+    pygame.draw.ellipse(surf, accent, (cx - 12, S - 22, 24, 10))  # belly
+    # Head.
+    pygame.draw.circle(surf, body, (cx + 16, S - 34), 11)
+    pygame.draw.ellipse(surf, body, (cx + 20, S - 36, 12, 8))  # snout
+    # Enormous claws on forelimb.
+    pygame.draw.rect(surf, dark, (cx - 16, S - 16, 7, 12))
+    for i in range(3):
+        pygame.draw.polygon(surf, (240, 250, 255),
+                            [(cx - 16 + i * 2, S - 4), (cx - 16 + i * 2 + 1, S - 1), (cx - 16 + i * 2 + 2, S - 4)])
+    # Eyes.
+    _draw_eyes(surf, cx + 16, S - 36, 4, 3)
+
+
+def _draw_leviathore(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.5)
+    # Water aura.
+    _soft_disc(surf, (cx, S - 26), 32, accent, alpha=55)
+    # Serpentine body: chain of decreasing circles curving across canvas.
+    nodes = [(cx - 26, S - 14), (cx - 14, S - 20), (cx - 2, S - 18),
+             (cx + 10, S - 24), (cx + 20, S - 20)]
+    for i, (nx, ny) in enumerate(nodes):
+        r = 13 - i
+        pygame.draw.circle(surf, body, (nx, ny), r)
+        pygame.draw.circle(surf, accent, (nx, ny - r // 3), max(2, r // 2))  # belly
+    # Dorsal fins along the spine.
+    for fx, fy in ((cx - 18, S - 30), (cx - 6, S - 32), (cx + 8, S - 36)):
+        pygame.draw.polygon(surf, dark,
+                            [(fx, fy), (fx + 4, fy - 8), (fx + 8, fy)])
+    # Head at the leading end.
+    pygame.draw.circle(surf, body, (cx + 26, S - 20), 12)
+    pygame.draw.polygon(surf, dark,
+                        [(cx + 34, S - 22), (cx + 42, S - 20), (cx + 34, S - 18)])  # jaw
+    # Eye.
+    pygame.draw.circle(surf, (255, 255, 255), (cx + 28, S - 23), 3)
+    pygame.draw.circle(surf, dark, (cx + 29, S - 23), 1)
+    # Side flipper.
+    pygame.draw.ellipse(surf, dark, (cx - 4, S - 12, 14, 6))
+
+
+def _draw_stormwing(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.55)
+    # Static arcs around body.
+    _draw_lightning(surf, cx - 18, S - 26, 3, glow)
+    _draw_lightning(surf, cx + 18, S - 26, 3, glow)
+    # Wings (feathered).
+    pygame.draw.polygon(surf, accent, [
+        (cx - 6, S - 30), (cx - 22, S - 40), (cx - 18, S - 26), (cx - 4, S - 24)])
+    pygame.draw.polygon(surf, accent, [
+        (cx + 6, S - 30), (cx + 22, S - 40), (cx + 18, S - 26), (cx + 4, S - 24)])
+    # Thin legs.
+    pygame.draw.line(surf, dark, (cx - 4, S - 14), (cx - 6, S - 2), 2)
+    pygame.draw.line(surf, dark, (cx + 4, S - 14), (cx + 6, S - 2), 2)
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 8, S - 28, 16, 16))
+    # Head.
+    pygame.draw.circle(surf, body, (cx, S - 36), 8)
+    # Beak.
+    pygame.draw.polygon(surf, (255, 180, 40),
+                        [(cx + 6, S - 38), (cx + 12, S - 36), (cx + 6, S - 34)])
+    # Eye.
+    _draw_eyes(surf, cx, S - 38, 3, 2)
+    # Crest feather.
+    pygame.draw.line(surf, dark, (cx, S - 44), (cx, S - 48), 2)
+
+
+def _draw_rockbash(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.5)
+    stone = (130, 120, 110)
+    # Short legs.
+    pygame.draw.rect(surf, dark, (cx - 12, S - 14, 6, 12))
+    pygame.draw.rect(surf, dark, (cx + 6, S - 14, 6, 12))
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 16, S - 28, 32, 18))
+    # Overlapping stone plates on the back.
+    for i, px in enumerate((cx - 12, cx - 4, cx + 4, cx + 12)):
+        r = 7 - abs(i - 1)
+        pygame.draw.circle(surf, stone, (px, S - 30), r)
+        pygame.draw.circle(surf, _darken(stone, 0.7), (px, S - 30), r, 1)
+    # Head.
+    pygame.draw.circle(surf, body, (cx - 16, S - 30), 9)
+    # Snout.
+    pygame.draw.ellipse(surf, body, (cx - 24, S - 30, 10, 8))
+    # Eyes.
+    _draw_eyes(surf, cx - 16, S - 32, 3, 2)
+    # Snout nostril.
+    pygame.draw.circle(surf, dark, (cx - 20, S - 30), 1)
+
+
+def _draw_seedkit(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.55)
+    # Stubby legs.
+    pygame.draw.rect(surf, dark, (cx - 8, S - 14, 6, 10))
+    pygame.draw.rect(surf, dark, (cx + 2, S - 14, 6, 10))
+    # Bulb body.
+    pygame.draw.ellipse(surf, body, (cx - 14, S - 28, 28, 20))
+    # Belly highlight.
+    pygame.draw.ellipse(surf, accent, (cx - 8, S - 20, 16, 10))
+    # Side leaves.
+    pygame.draw.ellipse(surf, dark, (cx - 22, S - 24, 10, 6))
+    pygame.draw.ellipse(surf, dark, (cx + 12, S - 24, 10, 6))
+    # Sprout stem.
+    pygame.draw.line(surf, dark, (cx, S - 30), (cx, S - 40), 2)
+    # Flower bud on top.
+    pygame.draw.circle(surf, (240, 150, 180), (cx, S - 42), 6)
+    pygame.draw.circle(surf, (255, 220, 120), (cx, S - 42), 3)
+    # Eyes.
+    _draw_eyes(surf, cx, S - 22, 4, 3)
+    # Smile.
+    pygame.draw.arc(surf, dark, (cx - 4, S - 20, 8, 6), 3.4, 6.0, 1)
+
+
+def _draw_chaospuff(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.45)
+    # Wispy aura.
+    _soft_disc(surf, (cx, S - 26), 24, accent, alpha=45)
+    # Drifting tendrils below.
+    for tx in (cx - 10, cx, cx + 10):
+        pygame.draw.lines(surf, dark, False,
+                          [(tx, S - 16), (tx - 3, S - 8), (tx + 3, S - 4)], 2)
+    # Irregular wispy body: overlapping circles of varying size.
+    for ox, oy, r in ((-8, 0, 11), (8, 0, 11), (0, -6, 12),
+                      (-4, 8, 9), (6, 8, 9), (0, 2, 13)):
+        pygame.draw.circle(surf, body, (cx + ox, S - 26 + oy), r)
+    # Wavy bottom edge.
+    pygame.draw.polygon(surf, body, [
+        (cx - 14, S - 16), (cx - 8, S - 12), (cx - 2, S - 16),
+        (cx + 4, S - 12), (cx + 10, S - 16), (cx + 14, S - 12),
+        (cx + 14, S - 8), (cx - 14, S - 8)])
+    # Glowing purple eyes (no pupils — shadowy).
+    pygame.draw.circle(surf, glow, (cx - 5, S - 30), 3)
+    pygame.draw.circle(surf, glow, (cx + 5, S - 30), 3)
+    pygame.draw.circle(surf, (255, 255, 255), (cx - 5, S - 30), 1)
+    pygame.draw.circle(surf, (255, 255, 255), (cx + 5, S - 30), 1)
+
+
+def _draw_thornbloom(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.5)
+    # Tall stem.
+    pygame.draw.rect(surf, dark, (cx - 4, S - 30, 8, 26))
+    # Thorns along the stem.
+    for ty in (S - 26, S - 18, S - 10):
+        _draw_thorn(surf, cx + 4, ty, 7, dark, angle=0)
+        _draw_thorn(surf, cx - 4, ty + 4, 7, dark, angle=180)
+    # Leaves.
+    pygame.draw.ellipse(surf, body, (cx - 18, S - 22, 12, 6))
+    pygame.draw.ellipse(surf, body, (cx + 6, S - 16, 12, 6))
+    # Flower head: petals around a center.
+    center = (cx, S - 38)
+    for i in range(8):
+        import math
+        a = i * (math.pi / 4)
+        px = int(center[0] + math.cos(a) * 10)
+        py = int(center[1] + math.sin(a) * 10)
+        pygame.draw.circle(surf, accent, (px, py), 6)
+    pygame.draw.circle(surf, (255, 220, 120), center, 7)
+    # Eyes on the flower center.
+    _draw_eyes(surf, cx, S - 40, 3, 2, white=(60, 40, 20), pupil=(255, 240, 200))
+
+
+def _draw_voltalon(surf, S, body, accent, glow):
+    cx = S // 2
+    dark = _darken(body, 0.5)
+    # Lightning shed from wings.
+    _draw_lightning(surf, cx - 20, S - 18, 4, glow)
+    _draw_lightning(surf, cx + 20, S - 18, 4, glow)
+    # Wings.
+    pygame.draw.polygon(surf, accent, [
+        (cx - 6, S - 32), (cx - 26, S - 44), (cx - 22, S - 28), (cx - 4, S - 26)])
+    pygame.draw.polygon(surf, accent, [
+        (cx + 6, S - 32), (cx + 26, S - 44), (cx + 22, S - 28), (cx + 4, S - 26)])
+    # Strong legs with claws.
+    for lx in (cx - 8, cx + 4):
+        pygame.draw.rect(surf, dark, (lx, S - 16, 7, 14))
+        for i in range(3):
+            pygame.draw.polygon(surf, (250, 240, 180),
+                                [(lx + i * 2, S - 2), (lx + i * 2 + 1, S + 1), (lx + i * 2 + 2, S - 2)])
+    # Tail.
+    pygame.draw.polygon(surf, body,
+                        [(cx - 14, S - 22), (cx - 26, S - 14), (cx - 12, S - 18)])
+    # Body.
+    pygame.draw.ellipse(surf, body, (cx - 14, S - 32, 28, 20))
+    # Head with snout.
+    pygame.draw.circle(surf, body, (cx + 12, S - 36), 10)
+    pygame.draw.polygon(surf, body,
+                        [(cx + 18, S - 38), (cx + 28, S - 36), (cx + 18, S - 34)])
+    # Crest horns.
+    pygame.draw.polygon(surf, dark,
+                        [(cx + 8, S - 44), (cx + 6, S - 50), (cx + 12, S - 44)])
+    # Eye.
+    pygame.draw.circle(surf, (255, 255, 255), (cx + 12, S - 38), 3)
+    pygame.draw.circle(surf, dark, (cx + 13, S - 38), 1)
+
+
+def _draw_generic(surf, S, body, accent, glow):
+    """Fallback blob for any species without a dedicated drawer."""
+    cx = S // 2
+    dark = _darken(body, 0.6)
+    _soft_disc(surf, (cx, S - 22), 20, glow, alpha=50)
+    pygame.draw.rect(surf, dark, (cx - 8, S - 14, 5, 10))
+    pygame.draw.rect(surf, dark, (cx + 3, S - 14, 5, 10))
+    pygame.draw.ellipse(surf, body, (cx - 14, S - 30, 28, 20))
+    pygame.draw.circle(surf, body, (cx, S - 36), 11)
+    _draw_eyes(surf, cx, S - 38, 4, 3)
+
+
+#: Species registry key (lowercase) -> dedicated draw function.
+_DRAWERS: Dict[str, _DrawFn] = {
+    "emberling": _draw_emberling,
+    "pyroclaw": _draw_pyroclaw,
+    "infernosaur": _draw_infernosaur,
+    "aquapup": _draw_aquapup,
+    "tsunamut": _draw_tsunamut,
+    "leviathore": _draw_leviathore,
+    "stormwing": _draw_stormwing,
+    "rockbash": _draw_rockbash,
+    "seedkit": _draw_seedkit,
+    "chaospuff": _draw_chaospuff,
+    "thornbloom": _draw_thornbloom,
+    "voltalon": _draw_voltalon,
+}
+
+
+# ---------------------------------------------------------------------------
+# Cache + public API
+# ---------------------------------------------------------------------------
 
 #: species_key -> base sprite (facing right).
 _CACHE: Dict[str, pygame.Surface] = {}
@@ -67,193 +534,39 @@ _CACHE: Dict[str, pygame.Surface] = {}
 #: "species_key|facing" -> battle sprite (optionally flipped / scaled).
 _BATTLE_CACHE: Dict[str, pygame.Surface] = {}
 
-#: Tracks whether we've logged the CWD / path diagnostics already.
-_DIAG_INITIALIZED: bool = False
+
+def _palette_for(element: str) -> Tuple[_RGB, _RGB, _RGB]:
+    """Return the (body, accent, glow) triple for an element."""
+    return _ELEMENT_PALETTE.get(element, _ELEMENT_PALETTE["normal"])
 
 
-def _init_diagnostics() -> None:
-    """Log CWD and directory listing once (lazily on first sprite load)."""
-    global _DIAG_INITIALIZED
-    if _DIAG_INITIALIZED:
-        return
-    _DIAG_INITIALIZED = True
-    try:
-        cwd = os.getcwd()
-    except Exception as exc:
-        cwd = f"<error: {exc}>"
-    _diag(f"[sprite] CWD={cwd}")
-    try:
-        entries = os.listdir(".")
-        _diag(f"[sprite] CWD entries: {entries}")
-    except Exception as exc:
-        _diag(f"[sprite] CWD listdir error: {exc}")
-    for cand in _SPRITE_PATH_CANDIDATES:
-        try:
-            files = os.listdir(cand)
-            pngs = [f for f in files if f.endswith(".png")]
-            _diag(f"[sprite] {cand}: {len(pngs)} PNGs")
-        except Exception:
-            _diag(f"[sprite] {cand}: not readable")
+def _size_for(stage: str) -> int:
+    """Return the canvas size for an evolution stage."""
+    return _STAGE_SIZE.get(stage, _DEFAULT_SIZE)
 
 
-def _error_placeholder(size: int = 56) -> pygame.Surface:
-    """Return a magenta error placeholder surface."""
-    surf = pygame.Surface((size, size), pygame.SRCALPHA)
-    surf.fill((255, 0, 255))
+def _build_sprite(species: Digimon) -> pygame.Surface:
+    """Build (but not cache) the base sprite surface for a species.
+
+    Prefers the baked PNG under ``assets/sprites/creatures/`` (see
+    ``tools/bake_sprites.py``). When that file is absent -- an incomplete
+    checkout, a stripped build -- the draw function is used instead, so the
+    game still renders a correct-looking creature rather than a blank.
+    """
+    loaded = AssetLoader.sprite(species.sprite_key)
+    if loaded is not None:
+        return loaded
+    return _draw_procedural(species)
+
+
+def _draw_procedural(species: Digimon) -> pygame.Surface:
+    """Draw a species from scratch with ``pygame.draw`` primitives."""
+    S = _size_for(species.stage)
+    body, accent, glow = _palette_for(species.element)
+    surf = pygame.Surface((S, S), pygame.SRCALPHA)
+    drawer = _DRAWERS.get(species.key, _draw_generic)
+    drawer(surf, S, body, accent, glow)
     return surf
-
-
-def _decode_png(data: bytes) -> pygame.Surface:
-    """Decode a PNG from raw bytes using only the standard library.
-
-    Falls back to this when ``pygame.image.load()`` cannot handle PNGs
-    (i.e. pygame was built without SDL_image).
-
-    Supports 8-bit RGBA (color type 6) and 8-bit RGB (color type 2).
-    """
-    if data[:8] != b"\x89PNG\r\n\x1a\n":
-        raise ValueError("Not a valid PNG file")
-
-    pos = 8
-    width = height = bit_depth = color_type = 0
-    idat_data = bytearray()
-
-    while pos < len(data):
-        chunk_len = struct.unpack(">I", data[pos : pos + 4])[0]
-        chunk_type = data[pos + 4 : pos + 8]
-        chunk_data = data[pos + 8 : pos + 8 + chunk_len]
-        pos += 12 + chunk_len  # 4 len + 4 type + data + 4 CRC
-
-        if chunk_type == b"IHDR":
-            (width, height, bit_depth, color_type,
-             _comp, _filt, _interlace) = struct.unpack(">IIBBBBB", chunk_data[:13])
-        elif chunk_type == b"IDAT":
-            idat_data.extend(chunk_data)
-        elif chunk_type == b"IEND":
-            break
-
-    if bit_depth != 8:
-        raise ValueError(f"Unsupported bit depth: {bit_depth}")
-
-    if color_type == 6:  # RGBA
-        bpp = 4
-    elif color_type == 2:  # RGB
-        bpp = 3
-    else:
-        raise ValueError(f"Unsupported color type: {color_type}")
-
-    raw = zlib.decompress(bytes(idat_data))
-
-    stride = width * bpp
-    unfiltered = bytearray(stride * height)
-
-    for y in range(height):
-        filter_type = raw[y * (stride + 1)]
-        line = bytearray(raw[y * (stride + 1) + 1 : y * (stride + 1) + 1 + stride])
-
-        if filter_type == 0:  # None
-            pass
-        elif filter_type == 1:  # Sub
-            for x in range(bpp, stride):
-                line[x] = (line[x] + line[x - bpp]) & 0xFF
-        elif filter_type == 2:  # Up
-            if y > 0:
-                prev = y * stride - stride
-                for x in range(stride):
-                    line[x] = (line[x] + unfiltered[prev + x]) & 0xFF
-        elif filter_type == 3:  # Average
-            for x in range(stride):
-                a = line[x - bpp] if x >= bpp else 0
-                b = unfiltered[(y - 1) * stride + x] if y > 0 else 0
-                line[x] = (line[x] + (a + b) // 2) & 0xFF
-        elif filter_type == 4:  # Paeth
-            for x in range(stride):
-                a = line[x - bpp] if x >= bpp else 0
-                b = unfiltered[(y - 1) * stride + x] if y > 0 else 0
-                c = unfiltered[(y - 1) * stride + x - bpp] if (y > 0 and x >= bpp) else 0
-                p = a + b - c
-                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-                if pa <= pb and pa <= pc:
-                    pred = a
-                elif pb <= pc:
-                    pred = b
-                else:
-                    pred = c
-                line[x] = (line[x] + pred) & 0xFF
-        else:
-            raise ValueError(f"Unknown filter type: {filter_type}")
-
-        unfiltered[y * stride : (y + 1) * stride] = line
-
-    if color_type == 2:  # RGB -> pad to RGBA
-        rgba = bytearray(width * height * 4)
-        for i in range(width * height):
-            rgba[i * 4] = unfiltered[i * 3]
-            rgba[i * 4 + 1] = unfiltered[i * 3 + 1]
-            rgba[i * 4 + 2] = unfiltered[i * 3 + 2]
-            rgba[i * 4 + 3] = 255
-        unfiltered = rgba
-
-    return pygame.image.frombytes(bytes(unfiltered), (width, height), "RGBA")
-
-
-def _try_load(path: str) -> pygame.Surface | None:
-    """Try loading a PNG from *path*.
-
-    Strategy:
-      1. ``pygame.image.load(path)`` — works when SDL_image is available.
-      2. Pure-Python decoder — reads bytes and decodes with ``zlib``/``struct``.
-
-    Returns the surface or ``None``.
-    """
-    # Strategy 1: pygame's built-in loader (needs SDL_image for PNG)
-    try:
-        surf = pygame.image.load(path)
-        _diag(f"[sprite] OK (pygame): {path} {surf.get_size()}")
-        return surf
-    except Exception as exc:
-        _diag(f"[sprite] pygame fail: {path} -> {exc}")
-
-    # Strategy 2: pure-Python PNG decoder (no SDL_image needed)
-    try:
-        with open(path, "rb") as f:
-            data = f.read()
-        surf = _decode_png(data)
-        _diag(f"[sprite] OK (decoder): {path} {surf.get_size()}")
-        return surf
-    except Exception as exc:
-        _diag(f"[sprite] decoder fail: {path} -> {exc}")
-
-    return None
-
-
-def _load_png_sprite(species: Digimon) -> pygame.Surface | None:
-    """Load a PNG sprite for *species*.
-
-    Tries multiple candidate directories and two loading strategies.
-    Returns the loaded surface (with per-pixel alpha) or ``None``.
-    """
-    _init_diagnostics()
-
-    stage_num = _STAGE_NUM.get(species.stage)
-    if stage_num is None:
-        _diag(f"[sprite] No stage mapping for {species.key} ({species.stage})")
-        return None
-
-    filename = f"{species.key}_{stage_num}.png"
-
-    for base in _SPRITE_PATH_CANDIDATES:
-        path = os.path.join(base, filename)
-        surf = _try_load(path)
-        if surf is not None:
-            try:
-                surf = surf.convert_alpha()
-            except Exception:
-                pass
-            return surf
-
-    _diag(f"[sprite] All paths failed for {species.key}")
-    return None
 
 
 def get_sprite(name: str) -> pygame.Surface:
@@ -263,27 +576,25 @@ def get_sprite(name: str) -> pygame.Surface:
         name: Species display name or lowercase registry key.
 
     Returns:
-        A transparent ``SRCALPHA`` surface with the creature sprite.
-        If the PNG cannot be loaded, a magenta error placeholder is returned.
+        A transparent ``SRCALPHA`` surface with the creature drawn on it.
+        Unknown species return a generic elemental blob.
     """
     key = name.strip().lower()
     cached = _CACHE.get(key)
     if cached is not None:
         return cached
-
     try:
         species = get_digimon(key)
     except KeyError:
-        _diag(f"[sprite] Unknown species: {key}")
-        surf = _error_placeholder()
-        _CACHE[key] = surf
-        return surf
+        species = None
 
-    png = _load_png_sprite(species)
-    if png is not None:
-        surf = png
+    if species is None:
+        surf = pygame.Surface((_DEFAULT_SIZE, _DEFAULT_SIZE), pygame.SRCALPHA)
+        _draw_generic(
+            surf, _DEFAULT_SIZE, *_ELEMENT_PALETTE["normal"]
+        )
     else:
-        surf = _error_placeholder()
+        surf = _build_sprite(species)
 
     _CACHE[key] = surf
     return surf
@@ -310,6 +621,8 @@ def get_battle_sprite(name: str, facing: str = "right") -> pygame.Surface:
     if facing == "left":
         sprite = pygame.transform.flip(base, True, False)
     else:
+        # Return a distinct copy so callers can scale freely without
+        # mutating the shared base sprite in the cache.
         sprite = base.copy()
     _BATTLE_CACHE[key] = sprite
     return sprite
@@ -344,6 +657,4 @@ __all__ = [
     "get_battle_sprite",
     "get_world_sprite",
     "clear_cache",
-    "get_diagnostics",
-    "DIAGNOSTICS",
 ]
