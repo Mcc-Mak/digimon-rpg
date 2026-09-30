@@ -37,6 +37,7 @@ from typing import Callable, Dict, Tuple
 import pygame
 
 from core.assets import AssetLoader
+from core.wasm_log import browser_log
 from data.digimon_data import Digimon, get_digimon
 
 # A draw function takes the target surface, the canvas size S, and the
@@ -553,9 +554,12 @@ def _build_sprite(species: Digimon) -> pygame.Surface:
     checkout, a stripped build -- the draw function is used instead, so the
     game still renders a correct-looking creature rather than a blank.
     """
+    browser_log(f"[factory] _build_sprite: species={species.key} sprite_key={species.sprite_key}")
     loaded = AssetLoader.sprite(species.sprite_key)
     if loaded is not None:
+        browser_log(f"[factory] using baked PNG for {species.key} size={loaded.get_size()}")
         return loaded
+    browser_log(f"[factory] baked PNG not available, drawing procedural for {species.key}")
     return _draw_procedural(species)
 
 
@@ -580,6 +584,7 @@ def get_sprite(name: str) -> pygame.Surface:
         Unknown species return a generic elemental blob.
     """
     key = name.strip().lower()
+    browser_log(f"[factory] get_sprite: name={name} key={key}")
     cached = _CACHE.get(key)
     if cached is not None:
         return cached
@@ -589,6 +594,7 @@ def get_sprite(name: str) -> pygame.Surface:
         species = None
 
     if species is None:
+        browser_log(f"[factory] species not found in registry: {key}, drawing generic")
         surf = pygame.Surface((_DEFAULT_SIZE, _DEFAULT_SIZE), pygame.SRCALPHA)
         _draw_generic(
             surf, _DEFAULT_SIZE, *_ELEMENT_PALETTE["normal"]
@@ -596,6 +602,7 @@ def get_sprite(name: str) -> pygame.Surface:
     else:
         surf = _build_sprite(species)
 
+    browser_log(f"[factory] get_sprite done: {key} size={surf.get_size()}")
     _CACHE[key] = surf
     return surf
 
@@ -613,6 +620,7 @@ def get_battle_sprite(name: str, facing: str = "right") -> pygame.Surface:
     """
     facing = "left" if facing == "left" else "right"
     key = f"{name.strip().lower()}|{facing}"
+    browser_log(f"[factory] get_battle_sprite: name={name} facing={facing}")
     cached = _BATTLE_CACHE.get(key)
     if cached is not None:
         return cached
@@ -624,6 +632,7 @@ def get_battle_sprite(name: str, facing: str = "right") -> pygame.Surface:
         # Return a distinct copy so callers can scale freely without
         # mutating the shared base sprite in the cache.
         sprite = base.copy()
+    browser_log(f"[factory] get_battle_sprite done: {key} size={sprite.get_size()}")
     _BATTLE_CACHE[key] = sprite
     return sprite
 
